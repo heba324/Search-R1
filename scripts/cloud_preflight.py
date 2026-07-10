@@ -146,8 +146,13 @@ def check_network(urls: Sequence[str] = NETWORK_URLS, timeout: int = 10) -> List
         request = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "Search-R1-preflight"})
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
-                if response.status >= 400:
+                if response.status >= 500:
                     errors.append(f"Network check failed for {url}: HTTP {response.status}")
+        except urllib.error.HTTPError as exc:
+            # A 4xx response still proves DNS, TCP, and TLS connectivity. Several
+            # artifact hosts intentionally reject requests to their root path.
+            if exc.code >= 500:
+                errors.append(f"Network check failed for {url}: HTTP {exc.code}")
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             errors.append(f"Network check failed for {url}: {exc}")
     return errors

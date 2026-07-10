@@ -1,6 +1,17 @@
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
 
-from scripts.cloud_preflight import HardwareInfo, assess_hardware, parse_gpu_memory
+from scripts.cloud_preflight import HardwareInfo, assess_hardware, check_network, parse_gpu_memory
+
+
+class ForbiddenHandler(BaseHTTPRequestHandler):
+    def do_HEAD(self):
+        self.send_response(403)
+        self.end_headers()
+
+    def log_message(self, format, *args):
+        pass
 
 
 class CloudPreflightTests(unittest.TestCase):
@@ -26,6 +37,18 @@ class CloudPreflightTests(unittest.TestCase):
         errors = "\n".join(assess_hardware("full", info))
         self.assertIn("128 GiB RAM", errors)
         self.assertIn("500 GiB free disk", errors)
+
+    def test_network_check_treats_http_403_as_reachable(self):
+        server = ThreadingHTTPServer(("127.0.0.1", 0), ForbiddenHandler)
+        thread = Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            url = f"http://127.0.0.1:{server.server_port}"
+            self.assertEqual(check_network((url,), timeout=2), [])
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
 
 
 if __name__ == "__main__":
