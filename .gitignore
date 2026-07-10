@@ -123,3 +123,6 @@ log/
 
 # Local isolated development worktrees
 .worktrees/
+
+# Cloud reproduction logs and evidence bundles
+artifacts/

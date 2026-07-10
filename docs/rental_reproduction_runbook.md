@@ -1,156 +1,152 @@
 # Search-R1 Cloud Reproduction Runbook
 
-This runbook is designed to reduce paid GPU time. Prepare the repository locally first, then rent a Linux GPU host and execute the commands below.
+This runbook separates a low-cost startup validation from the official-scale run. Local tests, a smoke run, and a completed full experiment are different evidence levels.
 
-## Recommended Rental Target
+## Provenance
 
-- OS: Ubuntu 20.04 or 22.04
-- GPU: 8 x A100 40GB or 8 x A100 80GB
-- CPU: 32 cores or more
-- RAM: 128GB or more
-- Disk: 500GB minimum, 1TB preferred
-- CUDA: 12.1-compatible image
-- Base image: PyTorch 2.4 / CUDA 12.1 if available
+- Prepared repository: `https://github.com/heba324/Search-R1`
+- Upstream repository: `https://github.com/PeterGriffinJin/Search-R1`
+- Recorded upstream baseline: `598e61b`
+- Training environment: `Search-R1`
+- Retriever environment: `Search-R1-retriever`
 
-For a cheaper first attempt, rent by the hour and run only the smoke test. Stop the machine immediately after collecting the log if the smoke test fails.
+Cloud helpers are kept in `scripts/cloud_*`. Upstream training, reward, retrieval, and data-processing implementations are left unchanged.
 
-## Cost-Saving Workflow
+## Rental Profiles
 
-1. Rent the machine only after this repository contains the cloud scripts.
-2. Start a by-hour 8 x A100 instance.
-3. Run environment installation once.
-4. Download data and index once.
-5. Run retriever check.
-6. Run the 2-step GRPO smoke test.
-7. Only if smoke test passes, decide whether to run the full training script.
+Smoke profile:
 
-## SSH Into The Machine
+- Ubuntu 20.04 or 22.04
+- 1 x A100 80GB
+- 64GB RAM minimum
+- 150GB disk minimum, 200GB recommended
+- Hourly billing
+
+Full profile:
+
+- Ubuntu 20.04 or 22.04
+- 8 x A100 40GB or 8 x A100 80GB
+- 128GB RAM minimum, 256GB recommended
+- 500GB disk minimum, 1TB recommended
+- Hourly billing
+
+The smoke stage builds a tiny E5 index from `example/corpus.jsonl`. It does not download the full Wikipedia index and cannot produce paper accuracy results.
+
+## Connect And Clone
 
 ```bash
 ssh root@YOUR_SERVER_IP
-nvidia-smi
-df -h
-```
-
-## Clone Repository
-
-```bash
-git clone https://github.com/PeterGriffinJin/Search-R1.git
+git clone https://github.com/heba324/Search-R1.git
 cd Search-R1
+git rev-parse HEAD
 ```
 
-If you are using this prepared local copy instead of the public repository, upload it with `scp` or push it to your own private GitHub repository first.
+## Stage A: Single-GPU Smoke
 
-## Install Training Environment
+Check the host before installing anything:
 
 ```bash
-bash scripts/cloud_setup_searchr1.sh
+python3 scripts/cloud_preflight.py --profile smoke
 ```
 
-This creates a conda environment named `searchr1` by default.
-
-## Install Retriever Environment
+Install the two environments:
 
 ```bash
-bash scripts/cloud_setup_retriever.sh
+bash scripts/cloud_setup_searchr1.sh 2>&1 | tee setup-Search-R1.log
+bash scripts/cloud_setup_retriever.sh 2>&1 | tee setup-retriever.log
 ```
 
-This creates a conda environment named `retriever` by default.
-
-## Download Data And Index
+Prepare NQ and a tiny retriever index:
 
 ```bash
-bash scripts/cloud_prepare_data_and_index.sh
+bash scripts/cloud_prepare_smoke_assets.sh 2>&1 | tee prepare-smoke.log
 ```
 
-Expected outputs:
-
-```text
-data/wiki18/e5_Flat.index
-data/wiki18/wiki-18.jsonl
-data/nq_search/train.parquet
-data/nq_search/test.parquet
-```
-
-This step can take a long time because it downloads the Wikipedia corpus and dense index from Hugging Face.
-
-## Launch Retriever
-
-Use `tmux` so the retriever keeps running:
+Start the smoke retriever in tmux:
 
 ```bash
 tmux new -s retriever
-bash scripts/cloud_launch_retriever.sh
+cd ~/Search-R1
+bash scripts/cloud_launch_retriever.sh 2>&1 | tee retriever-smoke.log
 ```
 
-Leave it running. In another terminal:
+Detach with `Ctrl+B`, then `D`. In another shell:
 
 ```bash
-tmux new -s train
-conda activate searchr1
+cd ~/Search-R1
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate Search-R1
 python scripts/cloud_check_retriever.py
-```
-
-The check should print `retriever ok` and three retrieved documents.
-
-## Run 2-Step Smoke Test
-
-```bash
 bash scripts/cloud_train_grpo_smoke.sh
+bash scripts/cloud_collect_evidence.sh smoke
 ```
 
-The smoke script first calls `scripts/cloud_check_retriever.py`. If the retriever is not alive, it fails before starting expensive training components.
+Smoke success means that the 2-step training path ran. It is not a paper reproduction result. If it fails, collect evidence and stop the paid instance.
 
-Success criteria:
+## Stage B: Eight-GPU Full Run
 
-- Model downloads and loads.
-- Ray starts.
-- vLLM rollout starts.
-- The retriever receives requests.
-- The script reaches training steps and writes `nq-search-r1-grpo-qwen2.5-3b-smoke.log`.
-
-If this fails, save the log and stop the paid instance. Do not start full training until the smoke test is fixed.
-
-## Run Full GRPO Training
-
-Only after smoke succeeds:
+Start a new full-profile instance and repeat clone and environment setup. Then run:
 
 ```bash
+python3 scripts/cloud_preflight.py --profile full
+bash scripts/cloud_prepare_data_and_index.sh 2>&1 | tee prepare-full.log
+```
+
+Start the full Wikipedia retriever:
+
+```bash
+tmux new -s retriever
+cd ~/Search-R1
+ASSET_PROFILE=full bash scripts/cloud_launch_retriever.sh 2>&1 | tee retriever-full.log
+```
+
+Detach and verify the API:
+
+```bash
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate Search-R1
+python scripts/cloud_check_retriever.py
+head -n 3 artifacts/retriever_profile.txt
+```
+
+The first marker line must be `full`. Start the expensive run only with explicit confirmation:
+
+```bash
+CONFIRM_FULL_RUN=YES bash scripts/cloud_train_grpo_full.sh
+```
+
+WandB is optional and disabled by default. To enable it:
+
+```bash
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate Search-R1
 wandb login
-bash scripts/cloud_train_grpo_full.sh
+CONFIRM_FULL_RUN=YES TRAINER_LOGGER=wandb bash scripts/cloud_train_grpo_full.sh
 ```
 
-Default model:
-
-```text
-Qwen/Qwen2.5-3B
-```
-
-Default training scale:
-
-```text
-8 GPUs
-1005 total training steps
-NQ search data
-local e5 dense retriever over wiki-18
-```
-
-## What To Save For The Report
-
-- `nvidia-smi` screenshot or text output
-- conda package versions
-- retriever check output
-- smoke test log
-- full training log if run
-- WandB link if enabled
-- checkpoint directory under `verl_checkpoints/`
-
-## Stop The Instance
-
-After the smoke test or full run:
+Collect final evidence:
 
 ```bash
-sudo shutdown now
+bash scripts/cloud_collect_evidence.sh full
 ```
 
-Also stop or destroy the instance in the cloud provider console. Some platforms keep charging if the instance is merely disconnected.
+## Full-Run Defaults
+
+```text
+Model: Qwen/Qwen2.5-3B base
+Algorithm: GRPO
+Dataset: NQ
+Retriever: E5 dense retrieval over Wikipedia 2018
+GPUs: 8
+Training steps: 1005
+Checkpoint interval: 100 steps
+Validation interval: 50 steps
+```
+
+## Evidence Boundary
+
+Local readiness requires automated tests and syntax checks. Cloud smoke evidence requires retriever output and a completed 2-step log. A full reproduction claim additionally requires the hardware inventory, exact Git commit, explicit Conda package lists, data hashes, full logs, checkpoints, evaluation metrics, and comparison with the paper.
+
+## Stop Billing
+
+After a failure or completion, download the evidence and stop or destroy the instance in the provider console. Disconnecting SSH does not stop billing.

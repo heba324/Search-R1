@@ -88,6 +88,50 @@ class CloudScriptContractTests(unittest.TestCase):
         self.assertIn('gzip -cd "$CORPUS_GZ" > "$CORPUS_TMP"', script)
         self.assertIn('mv "$CORPUS_TMP" "$CORPUS_FILE"', script)
 
+    def test_evidence_script_records_reproduction_metadata(self):
+        script = self.read("cloud_collect_evidence.sh")
+        for expected in (
+            'git rev-parse HEAD',
+            'git status --short',
+            'nvidia-smi',
+            'free -h',
+            'df -h',
+            'conda list -n "$SEARCH_ENV" --explicit',
+            'conda list -n "$RETRIEVER_ENV" --explicit',
+            'sha256sum',
+            'train.parquet',
+            'test.parquet',
+            '*.log',
+            'verl_checkpoints',
+        ):
+            self.assertIn(expected, script)
+        gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
+        self.assertIn("artifacts/", gitignore)
+
+    def test_beginner_docs_use_current_commands(self):
+        paths = (
+            ROOT / "docs" / "beginner_cloud_reproduction_zh.md",
+            ROOT / "docs" / "rental_reproduction_runbook.md",
+        )
+        combined = "\n".join(path.read_text(encoding="utf-8") for path in paths)
+        for expected in (
+            "https://github.com/heba324/Search-R1",
+            "Search-R1-retriever",
+            "cloud_preflight.py --profile smoke",
+            "cloud_prepare_smoke_assets.sh",
+            "ASSET_PROFILE=full bash scripts/cloud_launch_retriever.sh",
+            "CONFIRM_FULL_RUN=YES bash scripts/cloud_train_grpo_full.sh",
+            "cloud_collect_evidence.sh",
+        ):
+            self.assertIn(expected, combined)
+        for obsolete in (
+            "conda activate searchr1",
+            "conda activate retriever",
+            "Search-R1-reproduce",
+            "你的用户名",
+        ):
+            self.assertNotIn(obsolete, combined)
+
 
 if __name__ == "__main__":
     unittest.main()

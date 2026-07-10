@@ -1,620 +1,532 @@
 # Search-R1 新手云端复现操作手册
 
-这份手册的目标是：尽量少花钱，把 Search-R1 官方训练复现流程在云 GPU 上先跑通一个 2-step smoke test，再决定是否继续完整训练。
+这份手册用于先把代码、环境检查和省钱门禁准备好，再租 GPU。请严格区分下面三种状态：
 
-如果你是第一次租 GPU 服务器，照着下面一步一步做即可。不要一开始就跑完整训练。
+1. 本地测试通过：只说明辅助脚本的逻辑和语法通过检查。
+2. 单卡 smoke 通过：说明 Search-R1 的环境、模型、检索调用和 2-step GRPO 训练链路可以启动。
+3. 八卡 full 完成：有完整训练日志、checkpoint、评测指标和环境证据后，才能讨论论文复现结果。
 
-## 0. 你现在本地已经准备好了什么
+**smoke test 不等于论文复现成功。当前阶段也不能声称已经复现成功。**
 
-本地路径：
+## 1. 已准备好的代码
+
+本地仓库：
 
 ```text
 D:\python_code\Search-R1
 ```
 
-里面已经新增了一套云端辅助脚本：
+GitHub 仓库：
 
 ```text
-scripts/cloud_setup_searchr1.sh          训练环境安装
-scripts/cloud_setup_retriever.sh         检索环境安装
-scripts/cloud_prepare_data_and_index.sh  下载数据和索引
-scripts/cloud_launch_retriever.sh        启动检索服务
-scripts/cloud_check_retriever.py         检查检索 API
-scripts/cloud_train_grpo_smoke.sh        2-step 省钱验证训练
-scripts/cloud_train_grpo_full.sh         完整训练
-docs/rental_reproduction_runbook.md      英文简版手册
-docs/beginner_cloud_reproduction_zh.md   本文档
+https://github.com/heba324/Search-R1
 ```
 
-## 1. 先理解整体流程
-
-Search-R1 官方完整训练不是一个普通 Python 脚本，它分成两条线：
+官方上游代码来自：
 
 ```text
-检索服务线：
-下载 Wikipedia 语料和 e5 检索索引
-启动本地检索 API：http://127.0.0.1:8000/retrieve
-
-训练线：
-加载 Qwen2.5-3B
-用 Ray + FSDP + vLLM 跑 GRPO 强化学习
-模型生成 <search> query </search>
-程序调用检索 API
-把结果塞回 <information>...</information>
-模型继续生成 <answer>...</answer>
+https://github.com/PeterGriffinJin/Search-R1
 ```
 
-所以云服务器上至少要开两个终端：
+准备工作以官方提交 `598e61b` 为基线。官方训练、奖励、检索和数据处理核心代码保持不变，租机辅助逻辑放在 `scripts/cloud_*` 文件中。
+
+主要脚本：
 
 ```text
-终端 A：一直运行检索服务
-终端 B：运行 smoke test 或完整训练
+scripts/cloud_preflight.py                 租机配置检查
+scripts/cloud_setup_searchr1.sh            安装训练环境
+scripts/cloud_setup_retriever.sh           安装检索环境
+scripts/cloud_prepare_smoke_assets.sh      构建单卡微型检索索引
+scripts/cloud_prepare_data_and_index.sh    下载完整 Wikipedia 语料和索引
+scripts/cloud_launch_retriever.sh          启动 smoke 或 full 检索服务
+scripts/cloud_check_retriever.py           检查检索 API 和响应结构
+scripts/cloud_train_grpo_smoke.sh          运行 2-step GRPO
+scripts/cloud_train_grpo_full.sh           运行 8 卡完整训练
+scripts/cloud_collect_evidence.sh          收集报告证据
 ```
 
-## 2. 租服务器前先准备
+## 2. 为什么采用两阶段租用
 
-### 2.1 推荐配置
+第一次租机只使用仓库自带的 `example/corpus.jsonl` 构建很小的 E5 索引，不下载完整 Wikipedia。这样可以先验证：
 
-优先租：
+```text
+Conda 和 CUDA 环境
+PyTorch、vLLM、Ray、FSDP 和 flash-attn
+Qwen2.5-3B 模型加载
+E5 + FAISS 检索服务
+<search> -> <information> -> <answer> 调用链
+GRPO reward 和 2-step 训练入口
+```
+
+微型索引不用于评测准确率。只有单卡 smoke 通过后，才租八卡机器下载完整索引并跑正式训练。
+
+## 3. 租什么配置
+
+### 阶段 A：省钱 smoke
+
+推荐配置：
+
+```text
+系统：Ubuntu 22.04（Ubuntu 20.04 也可以）
+GPU：1 x A100 80GB
+内存：64GB 以上，推荐 96GB 或 128GB
+硬盘：至少 150GB，推荐 200GB
+镜像：带 Conda 的 PyTorch/CUDA 镜像
+计费：按小时
+```
+
+`cloud_preflight.py --profile smoke` 的硬门槛是 1 张至少 75GiB 显存的 GPU、64GiB 内存和 100GiB 可用磁盘。页面上选择磁盘时应留安装和模型缓存余量，因此建议 200GB。
+
+### 阶段 B：完整训练
+
+推荐配置：
 
 ```text
 系统：Ubuntu 20.04 或 Ubuntu 22.04
-GPU：8 × A100 40GB 或 8 × A100 80GB
-内存：128GB 以上
-硬盘：500GB 以上，最好 1TB
-镜像：PyTorch / CUDA / Ubuntu 镜像
-计费方式：按小时
+GPU：8 x A100 40GB，优先 8 x A100 80GB
+内存：至少 128GB，推荐 256GB
+硬盘：至少 500GB，推荐 1TB
+镜像：带 Conda 的 PyTorch/CUDA 镜像
+计费：按小时
 ```
 
-如果平台有现成镜像，优先选类似：
+不要选择 Windows 云主机、消费级小显存单卡、50GB 系统盘或按月计费实例。
 
-```text
-PyTorch 2.x + CUDA 12.x + Ubuntu 22.04
-```
+## 4. 租机后连接服务器
 
-不要租：
-
-```text
-Windows 云服务器
-单卡 4GB / 8GB / 12GB GPU
-只有 50GB 硬盘的机器
-按月包租
-```
-
-### 2.2 最省钱原则
-
-先只做 smoke test：
-
-```text
-只训练 2 step
-只验证环境、数据、检索、vLLM、Ray、FSDP 能跑通
-```
-
-smoke test 成功以后，才考虑完整训练。
-
-smoke test 失败以后：
-
-```text
-保存日志
-立刻关机
-把日志发给我排查
-不要继续烧钱
-```
-
-## 3. 把本地代码传到云服务器
-
-你有两种方式。新手推荐方式 A。
-
-## 方式 A：上传到你自己的 GitHub，再在服务器 git clone
-
-### 3.1 本地创建自己的 GitHub 仓库
-
-在 GitHub 上新建一个仓库，例如：
-
-```text
-Search-R1-reproduce
-```
-
-可以设为 private。
-
-### 3.2 本地提交这些文件
-
-在 PowerShell 进入本地仓库：
-
-```powershell
-cd D:\python_code\Search-R1
-git status
-```
-
-你应该能看到新增文件。
-
-如果你要把当前仓库推到自己的 GitHub，先设置你自己的远程地址。把下面的地址换成你的：
-
-```powershell
-git remote remove origin
-git remote add origin https://github.com/你的用户名/Search-R1-reproduce.git
-```
-
-提交：
-
-```powershell
-git add docs scripts
-git commit -m "add cloud reproduction scripts"
-git push -u origin main
-```
-
-如果 `git push` 报错，不要慌，把完整报错发给我。
-
-## 方式 B：直接压缩上传
-
-如果你不会 GitHub，可以把整个文件夹压缩成 zip，再用平台网页上传，或者用 `scp`。
-
-例如本地 PowerShell：
-
-```powershell
-cd D:\python_code
-Compress-Archive -Path .\Search-R1 -DestinationPath .\Search-R1.zip -Force
-```
-
-然后上传到服务器再解压：
-
-```bash
-unzip Search-R1.zip
-cd Search-R1
-```
-
-但方式 B 在大文件多的时候不如 GitHub 方便。
-
-## 4. 租到服务器以后怎么连接
-
-平台通常会给你：
-
-```text
-IP 地址
-SSH 端口
-用户名，常见是 root
-密码或私钥
-```
-
-在你本地 PowerShell 连接：
+平台会提供 IP、SSH 端口、用户名和密码或私钥。在本地 PowerShell 执行：
 
 ```powershell
 ssh root@服务器IP
 ```
 
-如果端口不是 22，比如是 12345：
+SSH 端口不是 22 时，例如 12345：
 
 ```powershell
 ssh -p 12345 root@服务器IP
 ```
 
-连上以后你会看到类似：
-
-```text
-root@xxx:~#
-```
-
-这说明你已经进入云服务器。
-
-## 5. 服务器上第一件事：检查 GPU 和硬盘
-
-在服务器里执行：
+连接后先确认基础命令：
 
 ```bash
 nvidia-smi
-```
-
-你应该看到 8 张 A100。如果不是 8 张，先不要继续。
-
-再看硬盘：
-
-```bash
 df -h
-```
-
-确保可用空间至少 500GB。低于 300GB 不建议继续完整复现。
-
-检查 conda：
-
-```bash
+free -h
 conda --version
+git --version
 ```
 
-如果提示 `conda: command not found`，说明镜像没有 conda。先停下，把情况发给我。
-
-## 6. 下载代码到服务器
-
-如果你用了 GitHub 方式：
+如果缺少 `git` 或 `tmux`：
 
 ```bash
-git clone https://github.com/你的用户名/Search-R1-reproduce.git
-cd Search-R1-reproduce
+apt-get update
+apt-get install -y git tmux
 ```
 
-如果你直接克隆官方仓库，则没有我们新增的云端脚本，不推荐。
+如果缺少 Conda，最省事的做法是关闭实例，重新选择带 Anaconda/Miniconda 的镜像。
 
-确认脚本存在：
+## 5. 下载我们准备好的仓库
+
+```bash
+git clone https://github.com/heba324/Search-R1.git
+cd Search-R1
+git rev-parse HEAD
+```
+
+确认辅助脚本存在：
 
 ```bash
 ls scripts/cloud_*
-ls docs/*reproduction*
 ```
 
-## 7. 安装训练环境
+如果 clone 后看不到这些脚本，先不要安装环境，检查是否拉取了正确仓库和分支。
 
-在仓库根目录执行：
+## 6. 阶段 A：运行单卡 smoke
+
+### 6.1 租机预检
 
 ```bash
-bash scripts/cloud_setup_searchr1.sh
+python3 scripts/cloud_preflight.py --profile smoke
 ```
 
-它会创建 conda 环境：
+最后必须看到：
 
 ```text
-searchr1
+Preflight passed for profile: smoke
 ```
 
-这个过程可能需要 20-60 分钟，取决于网络。
+如果出现 `Preflight failed`，不要继续安装。保存完整输出并关闭实例。
 
-成功时你会看到类似：
+### 6.2 安装两个 Conda 环境
+
+训练环境名称严格为：
 
 ```text
-torch: 2.4.0+cu121
-cuda available: True
-gpu count: 8
-Search-R1 training environment is ready: searchr1
+Search-R1
 ```
 
-如果 `flash-attn` 安装失败，保存报错，不要继续完整训练。
+检索环境名称严格为：
 
-## 8. 安装检索环境
+```text
+Search-R1-retriever
+```
 
-继续执行：
+安装命令：
 
 ```bash
-bash scripts/cloud_setup_retriever.sh
+bash scripts/cloud_setup_searchr1.sh 2>&1 | tee setup-Search-R1.log
+bash scripts/cloud_setup_retriever.sh 2>&1 | tee setup-retriever.log
 ```
 
-它会创建 conda 环境：
+这一步可能需要 20 到 60 分钟。`flash-attn` 编译期间一段时间没有新输出是正常现象。如果安装报错，不要继续训练。
 
-```text
-retriever
-```
-
-成功时你会看到类似：
-
-```text
-cuda available: True
-gpu count: 8
-faiss gpu resources: True
-Retriever environment is ready: retriever
-```
-
-## 9. 下载数据和索引
-
-执行：
+手动查看环境时使用：
 
 ```bash
-bash scripts/cloud_prepare_data_and_index.sh
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate Search-R1
+python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+
+conda activate Search-R1-retriever
+python -c "import faiss; print(hasattr(faiss, 'StandardGpuResources'))"
 ```
 
-它会下载：
+### 6.3 准备微型检索索引和 NQ 数据
+
+```bash
+bash scripts/cloud_prepare_smoke_assets.sh 2>&1 | tee prepare-smoke.log
+```
+
+它会：
 
 ```text
-wiki-18 corpus
-e5 dense index
-NQ 数据集
+下载并处理 NQ 数据集
+下载 intfloat/e5-base-v2
+读取 example/corpus.jsonl
+生成 data/smoke_retriever/e5_Flat.index
 ```
 
-成功时应该看到：
+它不会下载完整 Wikipedia 索引。
 
-```text
-Index: /.../data/wiki18/e5_Flat.index
-Corpus: /.../data/wiki18/wiki-18.jsonl
-Train data: /.../data/nq_search/train.parquet
-Test data: /.../data/nq_search/test.parquet
-```
-
-这个步骤可能很慢，因为文件较大。下载失败通常是网络问题。
-
-## 10. 启动检索服务
-
-推荐用 `tmux`，这样你关掉 SSH 窗口服务也不会立刻死。
-
-先开一个 tmux：
+### 6.4 启动 smoke 检索服务
 
 ```bash
 tmux new -s retriever
+cd ~/Search-R1
+bash scripts/cloud_launch_retriever.sh 2>&1 | tee retriever-smoke.log
 ```
 
-进入 tmux 后执行：
-
-```bash
-bash scripts/cloud_launch_retriever.sh
-```
-
-看到类似下面内容说明服务在启动：
+默认 `ASSET_PROFILE=smoke`。服务固定监听：
 
 ```text
-Uvicorn running on http://0.0.0.0:8000
+http://127.0.0.1:8000/retrieve
 ```
 
-这个终端不要关闭。
+看到 Uvicorn 启动信息后，按 `Ctrl+B`，松开，再按 `D`，退出 tmux 但保持服务运行。
 
-从 tmux 临时退出但保持服务运行：
-
-```text
-按 Ctrl+B
-松开
-再按 D
-```
-
-回到普通终端后，可以重新进入：
+查看服务日志：
 
 ```bash
 tmux attach -t retriever
 ```
 
-## 11. 检查检索 API 是否可用
+### 6.5 检查检索 API
 
-新开一个 tmux 或普通 SSH 终端：
-
-```bash
-tmux new -s train
-```
-
-进入仓库目录：
+在普通 SSH 终端执行：
 
 ```bash
-cd Search-R1-reproduce
-```
-
-如果你的目录名不同，用你实际的目录名。
-
-激活训练环境：
-
-```bash
-conda activate searchr1
-```
-
-检查检索服务：
-
-```bash
+cd ~/Search-R1
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate Search-R1
 python scripts/cloud_check_retriever.py
 ```
 
-成功时会看到：
+应看到 `retriever ok` 和 3 条文档。如果失败，不要运行训练。
 
-```text
-retriever ok
-1. score=...
-2. score=...
-3. score=...
-```
-
-如果这里失败，不要跑训练。先检查检索服务 tmux 有没有启动。
-
-## 12. 跑最省钱 smoke test
-
-确认检索服务可用后，执行：
+### 6.6 运行 2-step GRPO
 
 ```bash
+tmux new -s train
+cd ~/Search-R1
 bash scripts/cloud_train_grpo_smoke.sh
 ```
 
-这个脚本只跑：
+脚本会再次检查单卡配置和检索 API，然后运行：
 
 ```text
-2 training steps
-16 条训练样本
-8 条验证样本
-console logger
-不保存大 checkpoint
+模型：Qwen/Qwen2.5-3B
+算法：GRPO
+训练样本：8 条
+训练 batch：4
+rollout 数量：2
+训练步数：2
+日志：console
+checkpoint：不保存
 ```
 
-它的作用不是复现论文指标，而是验证：
-
-```text
-模型能下载
-Qwen2.5-3B 能加载
-Ray 能启动
-FSDP 能启动
-vLLM 能 rollout
-检索 API 能被调用
-reward 逻辑能执行
-训练循环能跑起来
-```
-
-成功后会生成日志：
+训练日志保存在：
 
 ```text
 nq-search-r1-grpo-qwen2.5-3b-smoke.log
 ```
 
-如果它跑完 2 step，说明环境基本成功。
+只有看到训练正常结束到第 2 step，才能说“smoke 训练链路通过”。这仍然不是论文指标复现。
 
-## 13. smoke test 失败怎么办
+### 6.7 收集 smoke 证据
 
-立刻做三件事：
-
-```bash
-nvidia-smi > nvidia-smi.txt
-conda list -n searchr1 > conda-searchr1.txt
-conda list -n retriever > conda-retriever.txt
-```
-
-把日志文件也留下：
+不论成功或失败，都执行：
 
 ```bash
-ls *.log
+cd ~/Search-R1
+bash scripts/cloud_collect_evidence.sh smoke
 ```
 
-然后打包：
-
-```bash
-tar -czf debug_logs.tar.gz *.log nvidia-smi.txt conda-searchr1.txt conda-retriever.txt
-```
-
-下载到本地，或者把报错粘给我。
-
-最重要：失败后不要继续完整训练。
-
-## 14. smoke test 成功后，是否跑完整训练
-
-如果你只是课程作业，不一定需要完整训练。
-
-你可以在报告里写：
+输出目录类似：
 
 ```text
-已在 8×A100 云服务器上完成 Search-R1 官方训练链路 smoke test，
-验证了数据处理、检索服务、Qwen2.5-3B 加载、Ray/FSDP/vLLM、
-GRPO 训练入口、搜索调用和 reward 计算均可运行。
-由于完整 1005-step 训练成本较高，本文仅做短步数复现验证。
+artifacts/reproduction-smoke-20260710T120000Z/
 ```
 
-如果老师要求必须尽量完整复现，再跑完整训练。
+里面包含 Git 提交、GPU、内存、磁盘、Conda 依赖、数据哈希、日志和检查点清单，不包含 API 密钥。
 
-## 15. 跑完整训练
+将证据包下载到本地后，立刻去云平台控制台停止或销毁单卡实例。只关闭 SSH 不会停止计费。
 
-先登录 WandB：
+## 7. 阶段 B：运行八卡完整复现
+
+阶段 A 失败时不要进入阶段 B。阶段 A 通过后，再创建一台满足 full 配置的实例，从第 4 节重新连接并 clone 仓库。
+
+### 7.1 八卡预检
 
 ```bash
-conda activate searchr1
-wandb login
+cd ~/Search-R1
+python3 scripts/cloud_preflight.py --profile full
 ```
 
-然后：
-
-```bash
-bash scripts/cloud_train_grpo_full.sh
-```
-
-完整训练默认是：
+最后必须看到：
 
 ```text
-Qwen/Qwen2.5-3B
+Preflight passed for profile: full
+```
+
+### 7.2 安装环境
+
+新实例需要重新安装：
+
+```bash
+bash scripts/cloud_setup_searchr1.sh 2>&1 | tee setup-Search-R1.log
+bash scripts/cloud_setup_retriever.sh 2>&1 | tee setup-retriever.log
+```
+
+### 7.3 下载完整数据和索引
+
+```bash
+bash scripts/cloud_prepare_data_and_index.sh 2>&1 | tee prepare-full.log
+```
+
+脚本会下载 `part_aa`、`part_ab` 和压缩 Wikipedia 语料，验证两个索引分片大小，原子拼接 `e5_Flat.index`，再原子解压语料。成功输出包括：
+
+```text
+data/wiki18/e5_Flat.index
+data/wiki18/wiki-18.jsonl
+data/nq_search/train.parquet
+data/nq_search/test.parquet
+```
+
+下载中断后可以重新执行同一命令，Hugging Face 缓存会继续使用已下载内容。
+
+### 7.4 启动 full 检索服务
+
+如果已有 smoke 检索 tmux，先停止：
+
+```bash
+tmux kill-session -t retriever
+```
+
+然后启动完整 Wikipedia 检索：
+
+```bash
+tmux new -s retriever
+cd ~/Search-R1
+ASSET_PROFILE=full bash scripts/cloud_launch_retriever.sh 2>&1 | tee retriever-full.log
+```
+
+按 `Ctrl+B`，再按 `D` 离开 tmux。检查：
+
+```bash
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate Search-R1
+python scripts/cloud_check_retriever.py
+head -n 3 artifacts/retriever_profile.txt
+```
+
+`retriever_profile.txt` 第一行必须是 `full`。
+
+### 7.5 运行完整 GRPO
+
+默认使用控制台日志，不要求 WandB：
+
+```bash
+tmux new -s train
+cd ~/Search-R1
+CONFIRM_FULL_RUN=YES bash scripts/cloud_train_grpo_full.sh
+```
+
+完整脚本会再次检查八卡配置、full 检索标记、NQ parquet 和检索 API。默认参数为：
+
+```text
+Qwen/Qwen2.5-3B base
 GRPO
-NQ search
 8 GPU
+NQ train/test
+Wikipedia 2018 + E5 dense retriever
 1005 training steps
+每 100 step 保存 checkpoint
+每 50 step 验证
 ```
 
-完整训练会更贵，可能跑很久。中途不要随便关机，否则钱花了但结果不完整。
-
-## 16. 需要保存哪些证据
-
-为了写实验报告，至少保存：
-
-```text
-1. nvidia-smi 输出
-2. conda 环境版本
-3. 数据下载成功截图或日志
-4. 检索 API 成功输出
-5. smoke test 日志
-6. 如果跑完整训练，保存完整训练日志
-7. 如果用了 WandB，保存 WandB 链接和曲线截图
-8. checkpoint 目录截图
-```
-
-常用命令：
+如需 WandB，先登录，再显式启用：
 
 ```bash
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate Search-R1
+wandb login
+CONFIRM_FULL_RUN=YES TRAINER_LOGGER=wandb bash scripts/cloud_train_grpo_full.sh
+```
+
+没有写 `CONFIRM_FULL_RUN=YES` 时，脚本会拒绝启动昂贵训练，这是正常的费用保护。
+
+### 7.6 收集 full 证据
+
+```bash
+cd ~/Search-R1
+bash scripts/cloud_collect_evidence.sh full
+```
+
+至少保存：
+
+```text
+完整训练日志
+nvidia-smi.txt
+两个 Conda explicit 依赖文件
+data-sha256.txt
+retriever_profile.txt
+checkpoint-files.txt
+verl_checkpoints/ 中的 checkpoint
+评测指标和 WandB 曲线（如果启用）
+```
+
+保存完毕后在云平台控制台停止或销毁实例。
+
+## 8. 从服务器下载证据
+
+先在服务器打包：
+
+```bash
+cd ~/Search-R1
+tar -czf search-r1-evidence.tar.gz artifacts *.log
+```
+
+在本地 PowerShell 下载，端口为 22 时：
+
+```powershell
+scp root@服务器IP:~/Search-R1/search-r1-evidence.tar.gz .
+```
+
+如果需要保存 checkpoint，单独打包并下载；checkpoint 可能很大，不要在确认下载完成前销毁磁盘。
+
+## 9. 失败时怎么做
+
+### 环境安装失败
+
+保存：
+
+```text
+setup-Search-R1.log
+setup-retriever.log
+nvidia-smi 输出
+```
+
+不要继续准备数据或训练。
+
+### 数据下载失败
+
+先看磁盘：
+
+```bash
+df -h
+du -sh data/*
+```
+
+磁盘足够时可以重新运行准备命令。不要手工删除 Hugging Face 缓存，除非已经确认缓存损坏。
+
+### 检索服务失败
+
+```bash
+tmux attach -t retriever
+cat artifacts/retriever_profile.txt
 nvidia-smi
-conda list -n searchr1
-conda list -n retriever
-ls data/wiki18
-ls data/nq_search
-ls verl_checkpoints
 ```
 
-## 17. 最后一定要关机
+把完整错误和 profile 文件一起保存。
 
-训练结束或失败后，先保存日志，然后关机：
+### 训练 OOM
 
-```bash
-sudo shutdown now
-```
+立即保存日志并停止训练。不要直接修改 full 参数后仍称为官方配置复现。任何 batch、长度、GPU 数量或显存利用率变化都必须记录在实验报告中。
 
-还要去云平台网页控制台确认：
+## 10. 报告中可以怎样表述
+
+只完成本地检查时：
 
 ```text
-实例已停止
-或实例已销毁
-没有继续计费
+已完成 Search-R1 官方代码与云端复现脚本的静态检查和自动化测试，
+尚未在 Linux GPU 环境执行训练，因此不构成实验复现结果。
 ```
 
-只断开 SSH 不等于停止计费。
-
-## 18. 新手常见问题
-
-### Q1：我看到命令卡住了，是不是坏了？
-
-不一定。安装 `flash-attn`、下载 Hugging Face 文件、加载检索索引都可能很慢。
-
-但如果 20 分钟没有任何输出，可以把当前输出发给我判断。
-
-### Q2：为什么要两个 conda 环境？
-
-因为训练环境和检索环境依赖不完全一样。
-
-官方 README 也建议分开：
+完成单卡 smoke 时：
 
 ```text
-searchr1：训练 Qwen/vLLM/Ray/FSDP
-retriever：FAISS/pyserini/检索服务
+在单张 A100 80GB 上，使用微型 E5 检索索引完成了 Search-R1 2-step GRPO
+训练链路验证。该实验验证了系统可运行性，不用于复现论文准确率。
 ```
 
-### Q3：我能不能用 1 张 4090？
+完成八卡 full 后，报告必须给出硬件、Git 提交、依赖、训练步数、日志、checkpoint、评测方法、指标和论文结果对比，不能只写“运行成功”。
 
-不建议做官方完整训练。可能可以做更小的调参实验，但不算严格复现官方脚本。
+## 11. 最短命令清单
 
-### Q4：为什么先跑 smoke test？
-
-因为完整训练很贵。smoke test 可以在很少步数内证明环境是否能跑通。
-
-### Q5：smoke test 成功是否等于论文复现成功？
-
-不等于。smoke test 只是证明训练链路可运行。
-
-论文级复现需要完整训练步数、评测指标和结果对比。
-
-## 19. 你可以直接复制的最短命令清单
-
-假设你已经 SSH 到服务器，并且代码仓库已经 clone 好：
+单卡 smoke：
 
 ```bash
-cd Search-R1-reproduce
+git clone https://github.com/heba324/Search-R1.git
+cd Search-R1
+python3 scripts/cloud_preflight.py --profile smoke
+bash scripts/cloud_setup_searchr1.sh
+bash scripts/cloud_setup_retriever.sh
+bash scripts/cloud_prepare_smoke_assets.sh
 
+tmux new -s retriever
+bash scripts/cloud_launch_retriever.sh
+# Ctrl+B，然后 D
+
+bash scripts/cloud_train_grpo_smoke.sh
+bash scripts/cloud_collect_evidence.sh smoke
+```
+
+八卡 full：
+
+```bash
+git clone https://github.com/heba324/Search-R1.git
+cd Search-R1
+python3 scripts/cloud_preflight.py --profile full
 bash scripts/cloud_setup_searchr1.sh
 bash scripts/cloud_setup_retriever.sh
 bash scripts/cloud_prepare_data_and_index.sh
 
 tmux new -s retriever
-bash scripts/cloud_launch_retriever.sh
+ASSET_PROFILE=full bash scripts/cloud_launch_retriever.sh
+# Ctrl+B，然后 D
+
+CONFIRM_FULL_RUN=YES bash scripts/cloud_train_grpo_full.sh
+bash scripts/cloud_collect_evidence.sh full
 ```
 
-按 `Ctrl+B`，再按 `D` 退出 tmux。
-
-然后：
-
-```bash
-tmux new -s train
-cd Search-R1-reproduce
-conda activate searchr1
-python scripts/cloud_check_retriever.py
-bash scripts/cloud_train_grpo_smoke.sh
-```
-
-smoke 成功后，如果决定完整训练：
-
-```bash
-wandb login
-bash scripts/cloud_train_grpo_full.sh
-```
-
-结束后：
-
-```bash
-sudo shutdown now
-```
-
+每次失败或结束后，都要回到云平台网页确认实例已经停止计费。
