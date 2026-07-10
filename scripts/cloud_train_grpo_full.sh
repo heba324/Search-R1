@@ -27,6 +27,8 @@ if [ "${CONFIRM_FULL_RUN:-}" != "YES" ]; then
   exit 1
 fi
 
+mkdir -p "$REPO_ROOT/artifacts"
+rm -f "$FULL_ATTESTATION" "$ATTESTATION_TMP"
 "$PYTHON_BIN" scripts/cloud_preflight.py --profile full
 
 current_commit="$(git rev-parse HEAD)"
@@ -80,8 +82,6 @@ source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "$SEARCH_ENV"
 
 python scripts/cloud_check_retriever.py
-mkdir -p "$REPO_ROOT/artifacts"
-rm -f "$FULL_ATTESTATION" "$ATTESTATION_TMP"
 
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}"
 export VLLM_ATTENTION_BACKEND="${VLLM_ATTENTION_BACKEND:-XFORMERS}"

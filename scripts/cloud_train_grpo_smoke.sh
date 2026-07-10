@@ -20,6 +20,8 @@ PROFILE_MARKER="$REPO_ROOT/artifacts/retriever_profile.txt"
 SMOKE_ATTESTATION="$REPO_ROOT/artifacts/smoke_passed.txt"
 ATTESTATION_TMP="$REPO_ROOT/artifacts/smoke_passed.txt.tmp"
 
+mkdir -p "$REPO_ROOT/artifacts"
+rm -f "$SMOKE_ATTESTATION" "$ATTESTATION_TMP"
 "$PYTHON_BIN" scripts/cloud_preflight.py --profile smoke
 
 if [ ! -f "$DATA_DIR/train.parquet" ]; then
@@ -59,8 +61,6 @@ if ! kill -0 "$retriever_pid" >/dev/null 2>&1; then
 fi
 
 python scripts/cloud_check_retriever.py
-mkdir -p "$REPO_ROOT/artifacts"
-rm -f "$SMOKE_ATTESTATION" "$ATTESTATION_TMP"
 
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 export VLLM_ATTENTION_BACKEND="${VLLM_ATTENTION_BACKEND:-XFORMERS}"

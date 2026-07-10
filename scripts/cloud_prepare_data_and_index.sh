@@ -19,6 +19,7 @@ CORPUS_GZ="$SAVE_PATH/wiki-18.jsonl.gz"
 CORPUS_FILE="$SAVE_PATH/wiki-18.jsonl"
 CORPUS_TMP="$SAVE_PATH/wiki-18.jsonl.tmp"
 INDEX_VALIDATION="$SAVE_PATH/e5_Flat.index.validated"
+CORPUS_VALIDATION="$SAVE_PATH/wiki-18.jsonl.validated"
 DOWNLOAD_MANIFEST="$SAVE_PATH/downloads.sha256"
 PART_AA_SIZE=42949672960
 PART_AB_SIZE=21609402413
@@ -73,7 +74,22 @@ actual_index_size=0
 if [ -f "$INDEX_FILE" ]; then
   actual_index_size="$(stat -c%s "$INDEX_FILE")"
 fi
-if [ "$actual_index_size" -ne "$expected_index_size" ]; then
+validation_key="$PART_AA_SHA256:$PART_AB_SHA256"
+index_needs_rebuild=false
+if [ "$actual_index_size" -ne "$expected_index_size" ] \
+    || [ ! -s "$INDEX_VALIDATION" ]; then
+  index_needs_rebuild=true
+else
+  saved_source_key="$(sed -n 's/^source_key=//p' "$INDEX_VALIDATION")"
+  saved_index_sha256="$(sed -n 's/^index_sha256=//p' "$INDEX_VALIDATION")"
+  actual_index_sha256="$(sha256sum "$INDEX_FILE" | awk '{print $1}')"
+  if [ "$saved_source_key" != "$validation_key" ] \
+      || [ "$saved_index_sha256" != "$actual_index_sha256" ]; then
+    index_needs_rebuild=true
+  fi
+fi
+
+if [ "$index_needs_rebuild" = true ]; then
   rm -f "$INDEX_TMP"
   trap 'rm -f "$INDEX_TMP"' EXIT
   cat "$PART_AA" "$PART_AB" > "$INDEX_TMP"
@@ -83,11 +99,7 @@ if [ "$actual_index_size" -ne "$expected_index_size" ]; then
   fi
   mv "$INDEX_TMP" "$INDEX_FILE"
   trap - EXIT
-fi
-
-validation_key="$PART_AA_SHA256:$PART_AB_SHA256"
-if [ ! -s "$INDEX_VALIDATION" ] \
-    || [ "$(cat "$INDEX_VALIDATION")" != "$validation_key" ]; then
+  actual_index_sha256="$(sha256sum "$INDEX_FILE" | awk '{print $1}')"
   conda activate "$RETRIEVER_ENV"
   INDEX_FILE="$INDEX_FILE" python - <<'PY'
 import os
@@ -102,12 +114,28 @@ if index.ntotal < 1:
     raise SystemExit("The E5 index contains no vectors.")
 print(f"FAISS index verified: dimension={index.d}, vectors={index.ntotal}")
 PY
-  printf '%s' "$validation_key" > "$INDEX_VALIDATION.tmp"
+  cat > "$INDEX_VALIDATION.tmp" <<EOF
+source_key=$validation_key
+index_sha256=$actual_index_sha256
+EOF
   mv "$INDEX_VALIDATION.tmp" "$INDEX_VALIDATION"
   conda activate "$SEARCH_ENV"
 fi
 
-if [ -s "$CORPUS_GZ" ] && [ ! -s "$CORPUS_FILE" ]; then
+corpus_needs_rebuild=false
+if [ ! -s "$CORPUS_FILE" ] || [ ! -s "$CORPUS_VALIDATION" ]; then
+  corpus_needs_rebuild=true
+else
+  saved_corpus_source="$(sed -n 's/^source_gz_sha256=//p' "$CORPUS_VALIDATION")"
+  saved_corpus_sha256="$(sed -n 's/^corpus_sha256=//p' "$CORPUS_VALIDATION")"
+  actual_corpus_sha256="$(sha256sum "$CORPUS_FILE" | awk '{print $1}')"
+  if [ "$saved_corpus_source" != "$CORPUS_GZ_SHA256" ] \
+      || [ "$saved_corpus_sha256" != "$actual_corpus_sha256" ]; then
+    corpus_needs_rebuild=true
+  fi
+fi
+
+if [ "$corpus_needs_rebuild" = true ]; then
   rm -f "$CORPUS_TMP"
   trap 'rm -f "$CORPUS_TMP"' EXIT
   gzip -cd "$CORPUS_GZ" > "$CORPUS_TMP"
@@ -117,6 +145,12 @@ if [ -s "$CORPUS_GZ" ] && [ ! -s "$CORPUS_FILE" ]; then
   fi
   mv "$CORPUS_TMP" "$CORPUS_FILE"
   trap - EXIT
+  actual_corpus_sha256="$(sha256sum "$CORPUS_FILE" | awk '{print $1}')"
+  cat > "$CORPUS_VALIDATION.tmp" <<EOF
+source_gz_sha256=$CORPUS_GZ_SHA256
+corpus_sha256=$actual_corpus_sha256
+EOF
+  mv "$CORPUS_VALIDATION.tmp" "$CORPUS_VALIDATION"
 fi
 
 if [ ! -s "$DATA_DIR/train.parquet" ] || [ ! -s "$DATA_DIR/test.parquet" ]; then

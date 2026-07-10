@@ -77,6 +77,10 @@ class CloudScriptContractTests(unittest.TestCase):
             script.index('status=passed'),
             script.index('-m verl.trainer.main_ppo'),
         )
+        self.assertLess(
+            script.index('rm -f "$SMOKE_ATTESTATION"'),
+            script.index('cloud_preflight.py --profile smoke'),
+        )
 
     def test_training_python_is_overridable_for_preflight_testing(self):
         for name in ("cloud_train_grpo_smoke.sh", "cloud_train_grpo_full.sh"):
@@ -97,6 +101,10 @@ class CloudScriptContractTests(unittest.TestCase):
         self.assertIn('kill -0 "$retriever_pid"', script)
         self.assertIn('index_file=$REPO_ROOT/data/wiki18/e5_Flat.index', script)
         self.assertIn('corpus_file=$REPO_ROOT/data/wiki18/wiki-18.jsonl', script)
+        self.assertLess(
+            script.index('rm -f "$FULL_ATTESTATION"'),
+            script.index('cloud_preflight.py --profile full'),
+        )
 
     def test_console_logging_is_default(self):
         script = self.read("cloud_train_grpo_full.sh")
@@ -130,6 +138,10 @@ class CloudScriptContractTests(unittest.TestCase):
         self.assertIn('RETRIEVER_ENV="${RETRIEVER_ENV:-Search-R1-retriever}"', script)
         self.assertIn('faiss.read_index', script)
         self.assertIn('downloads.sha256', script)
+        self.assertIn('sha256sum "$INDEX_FILE"', script)
+        self.assertIn('index_sha256=', script)
+        self.assertIn('sha256sum "$CORPUS_FILE"', script)
+        self.assertIn('corpus_sha256=', script)
 
     def test_full_corpus_decompression_is_atomic(self):
         script = self.read("cloud_prepare_data_and_index.sh")
@@ -159,6 +171,8 @@ class CloudScriptContractTests(unittest.TestCase):
             'artifacts/full_completed.txt',
             'RUN_STATUS=not_completed',
             'EXPECTED_LOG=',
+            'e5_Flat.index.validated',
+            'wiki-18.jsonl.validated',
         ):
             self.assertIn(expected, script)
         gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")

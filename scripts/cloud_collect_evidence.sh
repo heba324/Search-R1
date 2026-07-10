@@ -114,6 +114,13 @@ fi
 if [ -f "$REPO_ROOT/data/wiki18/downloads.sha256" ]; then
   cp "$REPO_ROOT/data/wiki18/downloads.sha256" "$OUTPUT_DIR/"
 fi
+for validation_file in \
+  "$REPO_ROOT/data/wiki18/e5_Flat.index.validated" \
+  "$REPO_ROOT/data/wiki18/wiki-18.jsonl.validated"; do
+  if [ -f "$validation_file" ]; then
+    cp "$validation_file" "$OUTPUT_DIR/"
+  fi
+done
 
 EXPERIMENT_CHECKPOINTS="$REPO_ROOT/verl_checkpoints/$EXPERIMENT_NAME"
 if [ -d "$EXPERIMENT_CHECKPOINTS" ]; then
