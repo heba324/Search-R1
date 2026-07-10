@@ -45,8 +45,9 @@ when a hard requirement is missing.
 
 Two profiles are supported:
 
-- `smoke`: at least one NVIDIA GPU, at least 70 GiB RAM, and at least 250 GiB
-  free disk. Passing this profile authorizes preparation and startup checks only.
+- `smoke`: at least one 80 GiB NVIDIA GPU, at least 64 GiB RAM, and at least
+  100 GiB free disk. Passing this profile authorizes preparation and startup
+  checks only.
 - `full`: exactly the requested official single-node scale of at least eight
   NVIDIA GPUs, at least 40 GiB VRAM per GPU, at least 128 GiB RAM, and at least
   500 GiB free disk.
@@ -57,15 +58,18 @@ The main Conda environment is named `Search-R1`, as requested. The retriever use
 the separate `Search-R1-retriever` environment because its FAISS and Python
 requirements differ from the training runtime.
 
-Environment scripts are idempotent. Data preparation supports resumed Hugging
-Face downloads and verifies that both index parts, the joined FAISS index, the
+Environment scripts are idempotent. Smoke preparation builds a tiny E5 index
+from `example/corpus.jsonl` and downloads only NQ, avoiding the full Wikipedia
+index cost on the first rental. Full preparation supports resumed Hugging Face
+downloads and verifies that both index parts, the joined FAISS index, the
 decompressed corpus, and NQ parquet files exist and are non-empty before success.
 
 ### Retrieval Gate
 
-The retrieval launcher validates its files and accepts an explicit port. The API
-check validates the response schema as well as HTTP status, ensuring that training
-will receive documents in the shape expected by Search-R1.
+The retrieval launcher validates its files and has explicit `smoke` and `full`
+asset profiles on the fixed upstream port 8000. The API check validates the
+response schema as well as HTTP status, ensuring that training will receive
+documents in the shape expected by Search-R1.
 
 ### Training Gates
 
