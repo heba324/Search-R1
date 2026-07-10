@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 import unittest
 
 
@@ -131,6 +132,18 @@ class CloudScriptContractTests(unittest.TestCase):
             "你的用户名",
         ):
             self.assertNotIn(obsolete, combined)
+
+    def test_cloud_shell_scripts_are_executable_in_git(self):
+        output = subprocess.check_output(
+            ["git", "ls-files", "--stage", "scripts/cloud_*.sh"],
+            cwd=ROOT,
+            text=True,
+        )
+        entries = [line for line in output.splitlines() if line]
+        self.assertGreater(len(entries), 0)
+        for entry in entries:
+            mode, _, _, path = entry.split(maxsplit=3)
+            self.assertEqual(mode, "100755", path)
 
 
 if __name__ == "__main__":
