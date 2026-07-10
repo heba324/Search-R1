@@ -9,6 +9,7 @@ from scripts.paper_v1.contract import (
     assess_required_assets,
     assess_result_metrics,
 )
+from scripts.paper_v1.preflight import HostInfo, assess_host
 
 
 class PaperV1ContractTests(unittest.TestCase):
@@ -44,6 +45,13 @@ class PaperV1ContractTests(unittest.TestCase):
             REQUIRED_EVALUATION_DATASETS,
             ("nq", "triviaqa", "popqa", "hotpotqa", "2wikimultihopqa", "musique", "bamboogle"),
         )
+
+    def test_host_assessment_requires_paper_scale_resources(self):
+        errors = assess_host(HostInfo(gpu_count=4, ram_gib=96, disk_gib=400))
+        message = "\n".join(errors)
+        self.assertIn("at least 8 NVIDIA GPUs", message)
+        self.assertIn("128 GiB RAM", message)
+        self.assertIn("500 GiB free disk", message)
 
 
 if __name__ == "__main__":
