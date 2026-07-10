@@ -5,12 +5,19 @@ set -euo pipefail
 # This verifies model loading, Ray/FSDP/vLLM wiring, retrieval calls, reward code,
 # and checkpoint/log directory creation with only a few training steps.
 
-SEARCH_ENV="${SEARCH_ENV:-searchr1}"
-DATA_DIR="${DATA_DIR:-$PWD/data/nq_search}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
+SEARCH_ENV="${SEARCH_ENV:-Search-R1}"
+DATA_DIR="${DATA_DIR:-$REPO_ROOT/data/nq_search}"
 BASE_MODEL="${BASE_MODEL:-Qwen/Qwen2.5-3B}"
 EXPERIMENT_NAME="${EXPERIMENT_NAME:-nq-search-r1-grpo-qwen2.5-3b-smoke}"
 WAND_PROJECT="${WAND_PROJECT:-Search-R1-smoke}"
-GPUS_PER_NODE="${GPUS_PER_NODE:-$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l | tr -d ' ')}"
+GPUS_PER_NODE="${GPUS_PER_NODE:-1}"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+
+"$PYTHON_BIN" scripts/cloud_preflight.py --profile smoke
 
 if [ ! -f "$DATA_DIR/train.parquet" ]; then
   echo "Missing train parquet: $DATA_DIR/train.parquet" >&2
@@ -27,16 +34,16 @@ conda activate "$SEARCH_ENV"
 
 python scripts/cloud_check_retriever.py
 
-export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-$(seq -s, 0 $((GPUS_PER_NODE - 1)))}"
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 export VLLM_ATTENTION_BACKEND="${VLLM_ATTENTION_BACKEND:-XFORMERS}"
 export PYTHONUNBUFFERED=1
 
-python3 -m verl.trainer.main_ppo \
+"$PYTHON_BIN" -m verl.trainer.main_ppo \
   data.train_files="$DATA_DIR/train.parquet" \
   data.val_files="$DATA_DIR/test.parquet" \
-  data.train_data_num=16 \
+  data.train_data_num=8 \
   data.val_data_num=8 \
-  data.train_batch_size=8 \
+  data.train_batch_size=4 \
   data.val_batch_size=8 \
   data.max_prompt_length=2048 \
   data.max_response_length=128 \
@@ -50,7 +57,7 @@ python3 -m verl.trainer.main_ppo \
   actor_rollout_ref.actor.optim.lr=1e-6 \
   actor_rollout_ref.actor.optim.lr_warmup_steps_ratio=0.0 \
   actor_rollout_ref.actor.use_kl_loss=true \
-  actor_rollout_ref.actor.ppo_mini_batch_size=8 \
+  actor_rollout_ref.actor.ppo_mini_batch_size=4 \
   actor_rollout_ref.actor.ppo_micro_batch_size=1 \
   actor_rollout_ref.actor.fsdp_config.param_offload=true \
   actor_rollout_ref.actor.fsdp_config.grad_offload=true \
@@ -58,9 +65,9 @@ python3 -m verl.trainer.main_ppo \
   actor_rollout_ref.rollout.log_prob_micro_batch_size=1 \
   actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
   actor_rollout_ref.rollout.name=vllm \
-  actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
+  actor_rollout_ref.rollout.gpu_memory_utilization=0.45 \
   actor_rollout_ref.rollout.max_num_batched_tokens=4096 \
-  actor_rollout_ref.rollout.max_num_seqs=16 \
+  actor_rollout_ref.rollout.max_num_seqs=8 \
   actor_rollout_ref.ref.log_prob_micro_batch_size=1 \
   actor_rollout_ref.ref.fsdp_config.param_offload=true \
   actor_rollout_ref.actor.kl_loss_coef=0.001 \

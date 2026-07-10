@@ -4,12 +4,48 @@ set -euo pipefail
 # Full GRPO run using the official Search-R1 scale. Run this only after the
 # smoke test succeeds.
 
-SEARCH_ENV="${SEARCH_ENV:-searchr1}"
-DATA_DIR="${DATA_DIR:-$PWD/data/nq_search}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
+SEARCH_ENV="${SEARCH_ENV:-Search-R1}"
+DATA_DIR="${DATA_DIR:-$REPO_ROOT/data/nq_search}"
 BASE_MODEL="${BASE_MODEL:-Qwen/Qwen2.5-3B}"
 EXPERIMENT_NAME="${EXPERIMENT_NAME:-nq-search-r1-grpo-qwen2.5-3b-em}"
 WAND_PROJECT="${WAND_PROJECT:-Search-R1}"
 GPUS_PER_NODE="${GPUS_PER_NODE:-8}"
+TRAINER_LOGGER="${TRAINER_LOGGER:-console}"
+PROFILE_MARKER="$REPO_ROOT/artifacts/retriever_profile.txt"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+
+if [ "${CONFIRM_FULL_RUN:-}" != "YES" ]; then
+  echo "CONFIRM_FULL_RUN must be YES before the expensive full run can start." >&2
+  echo "Run: CONFIRM_FULL_RUN=YES bash scripts/cloud_train_grpo_full.sh" >&2
+  exit 1
+fi
+
+"$PYTHON_BIN" scripts/cloud_preflight.py --profile full
+
+if [ ! -s "$PROFILE_MARKER" ] || [ "$(head -n 1 "$PROFILE_MARKER")" != "full" ]; then
+  echo "The full run requires a running full retriever profile." >&2
+  echo "Start it with: ASSET_PROFILE=full bash scripts/cloud_launch_retriever.sh" >&2
+  exit 1
+fi
+
+case "$TRAINER_LOGGER" in
+  console|wandb) ;;
+  *)
+    echo "TRAINER_LOGGER must be 'console' or 'wandb'." >&2
+    exit 1
+    ;;
+esac
+
+for parquet in "$DATA_DIR/train.parquet" "$DATA_DIR/test.parquet"; do
+  if [ ! -s "$parquet" ]; then
+    echo "Missing full-run data file: $parquet" >&2
+    exit 1
+  fi
+done
 
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "$SEARCH_ENV"
@@ -20,7 +56,7 @@ export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}"
 export VLLM_ATTENTION_BACKEND="${VLLM_ATTENTION_BACKEND:-XFORMERS}"
 export PYTHONUNBUFFERED=1
 
-python3 -m verl.trainer.main_ppo \
+"$PYTHON_BIN" -m verl.trainer.main_ppo \
   data.train_files="$DATA_DIR/train.parquet" \
   data.val_files="$DATA_DIR/test.parquet" \
   data.train_data_num=null \
@@ -56,7 +92,7 @@ python3 -m verl.trainer.main_ppo \
   actor_rollout_ref.rollout.n_agent=5 \
   actor_rollout_ref.rollout.temperature=1 \
   actor_rollout_ref.actor.state_masking=true \
-  "trainer.logger=['wandb']" \
+  "trainer.logger=['${TRAINER_LOGGER}']" \
   +trainer.val_only=false \
   +trainer.val_before_train=true \
   trainer.default_hdfs_dir=null \
