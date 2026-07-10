@@ -22,9 +22,10 @@ POLICIES: Dict[str, Dict[str, int]] = {
     "full": {"gpus": 8, "vram_mib": 40 * MIB_PER_GIB, "ram_gib": 128, "disk_gib": 500},
 }
 NETWORK_URLS = (
-    "https://github.com",
-    "https://huggingface.co",
-    "https://download.pytorch.org",
+    "https://github.com/heba324/Search-R1",
+    "https://huggingface.co/Qwen/Qwen2.5-3B/resolve/main/config.json",
+    "https://huggingface.co/datasets/RUC-NLPIR/FlashRAG_datasets/resolve/main/README.md",
+    "https://download.pytorch.org/whl/cu121/torch/",
 )
 REQUIRED_REPOSITORY_PATHS = (
     "search_r1",
@@ -124,6 +125,16 @@ def collect_hardware(repo_root: Path) -> HardwareInfo:
     )
 
 
+def collect_git_commit(repo_root: Path) -> str:
+    try:
+        commit = run_command(["git", "-C", os.fspath(repo_root), "rev-parse", "HEAD"])
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ValueError(f"Unable to determine Git commit for {repo_root}: {exc}") from exc
+    if not commit:
+        raise ValueError(f"Unable to determine Git commit for {repo_root}: empty output")
+    return commit
+
+
 def check_repository(repo_root: Path) -> List[str]:
     errors: List[str] = []
     for relative_path in REQUIRED_REPOSITORY_PATHS:
@@ -146,13 +157,10 @@ def check_network(urls: Sequence[str] = NETWORK_URLS, timeout: int = 10) -> List
         request = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "Search-R1-preflight"})
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
-                if response.status >= 500:
+                if response.status >= 400:
                     errors.append(f"Network check failed for {url}: HTTP {response.status}")
         except urllib.error.HTTPError as exc:
-            # A 4xx response still proves DNS, TCP, and TLS connectivity. Several
-            # artifact hosts intentionally reject requests to their root path.
-            if exc.code >= 500:
-                errors.append(f"Network check failed for {url}: HTTP {exc.code}")
+            errors.append(f"Network check failed for {url}: HTTP {exc.code}")
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             errors.append(f"Network check failed for {url}: {exc}")
     return errors
@@ -183,6 +191,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parse_args(argv)
     repo_root = args.repo_root.resolve()
     errors: List[str] = []
+    commit: Optional[str] = None
 
     print(f"Search-R1 cloud preflight profile: {args.profile}")
     print(f"Repository: {repo_root}")
@@ -192,6 +201,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         errors.append("Cloud reproduction requires Linux (Ubuntu 20.04 or 22.04 recommended).")
     errors.extend(check_commands())
     errors.extend(check_repository(repo_root))
+    if shutil.which("git") is not None:
+        try:
+            commit = collect_git_commit(repo_root)
+        except ValueError as exc:
+            errors.append(str(exc))
 
     hardware: Optional[HardwareInfo] = None
     if shutil.which("nvidia-smi") is not None and Path("/proc/meminfo").exists():
@@ -211,7 +225,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"- {error}", file=sys.stderr)
         return 1
 
-    commit = run_command(["git", "-C", os.fspath(repo_root), "rev-parse", "HEAD"])
+    if commit is None:
+        print("Preflight failed to record a Git commit.", file=sys.stderr)
+        return 1
     print(f"Git commit: {commit}")
     print(f"Preflight passed for profile: {args.profile}")
     if args.profile == "smoke":

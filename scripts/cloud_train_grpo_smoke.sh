@@ -16,6 +16,9 @@ EXPERIMENT_NAME="${EXPERIMENT_NAME:-nq-search-r1-grpo-qwen2.5-3b-smoke}"
 WAND_PROJECT="${WAND_PROJECT:-Search-R1-smoke}"
 GPUS_PER_NODE="${GPUS_PER_NODE:-1}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
+PROFILE_MARKER="$REPO_ROOT/artifacts/retriever_profile.txt"
+SMOKE_ATTESTATION="$REPO_ROOT/artifacts/smoke_passed.txt"
+ATTESTATION_TMP="$REPO_ROOT/artifacts/smoke_passed.txt.tmp"
 
 "$PYTHON_BIN" scripts/cloud_preflight.py --profile smoke
 
@@ -32,7 +35,32 @@ fi
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "$SEARCH_ENV"
 
+current_commit="$(git rev-parse HEAD)"
+if [ ! -s "$PROFILE_MARKER" ] \
+    || ! grep -Fqx "profile=smoke" "$PROFILE_MARKER" \
+    || ! grep -Fqx "git_commit=$current_commit" "$PROFILE_MARKER" \
+    || ! grep -Fqx "index_file=$REPO_ROOT/data/smoke_retriever/e5_Flat.index" "$PROFILE_MARKER" \
+    || ! grep -Fqx "corpus_file=$REPO_ROOT/example/corpus.jsonl" "$PROFILE_MARKER"; then
+  echo "Smoke training requires a ready smoke retriever from the same Git commit." >&2
+  echo "Start it with: bash scripts/cloud_launch_retriever.sh" >&2
+  exit 1
+fi
+
+retriever_pid="$(sed -n 's/^pid=//p' "$PROFILE_MARKER" | head -n 1)"
+case "$retriever_pid" in
+  ''|*[!0-9]*)
+    echo "Retriever profile contains an invalid PID." >&2
+    exit 1
+    ;;
+esac
+if ! kill -0 "$retriever_pid" >/dev/null 2>&1; then
+  echo "Retriever profile PID is no longer running: $retriever_pid" >&2
+  exit 1
+fi
+
 python scripts/cloud_check_retriever.py
+mkdir -p "$REPO_ROOT/artifacts"
+rm -f "$SMOKE_ATTESTATION" "$ATTESTATION_TMP"
 
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 export VLLM_ATTENTION_BACKEND="${VLLM_ATTENTION_BACKEND:-XFORMERS}"
@@ -93,3 +121,15 @@ export PYTHONUNBUFFERED=1
   retriever.url="http://127.0.0.1:8000/retrieve" \
   retriever.topk=3 \
   2>&1 | tee "$EXPERIMENT_NAME.log"
+
+cat > "$ATTESTATION_TMP" <<EOF
+status=passed
+mode=smoke
+git_commit=$current_commit
+experiment_name=$EXPERIMENT_NAME
+training_steps=2
+completed_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+retriever_profile_sha256=$(sha256sum "$PROFILE_MARKER" | awk '{print $1}')
+EOF
+mv "$ATTESTATION_TMP" "$SMOKE_ATTESTATION"
+echo "Smoke success attestation: $SMOKE_ATTESTATION"

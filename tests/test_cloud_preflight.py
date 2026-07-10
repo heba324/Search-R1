@@ -1,8 +1,16 @@
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from threading import Thread
 
-from scripts.cloud_preflight import HardwareInfo, assess_hardware, check_network, parse_gpu_memory
+from scripts.cloud_preflight import (
+    HardwareInfo,
+    assess_hardware,
+    check_network,
+    collect_git_commit,
+    parse_gpu_memory,
+)
 
 
 class ForbiddenHandler(BaseHTTPRequestHandler):
@@ -38,17 +46,23 @@ class CloudPreflightTests(unittest.TestCase):
         self.assertIn("128 GiB RAM", errors)
         self.assertIn("500 GiB free disk", errors)
 
-    def test_network_check_treats_http_403_as_reachable(self):
+    def test_network_check_rejects_http_403(self):
         server = ThreadingHTTPServer(("127.0.0.1", 0), ForbiddenHandler)
         thread = Thread(target=server.serve_forever)
         thread.start()
         try:
             url = f"http://127.0.0.1:{server.server_port}"
-            self.assertEqual(check_network((url,), timeout=2), [])
+            errors = check_network((url,), timeout=2)
+            self.assertIn("HTTP 403", "\n".join(errors))
         finally:
             server.shutdown()
             server.server_close()
             thread.join()
+
+    def test_collect_git_commit_rejects_non_repository(self):
+        with TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, "Git commit"):
+                collect_git_commit(Path(directory))
 
 
 if __name__ == "__main__":

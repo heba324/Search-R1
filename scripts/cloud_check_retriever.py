@@ -2,6 +2,7 @@
 """Verify that the Search-R1 retriever API is reachable and well formed."""
 
 import os
+import math
 import sys
 from typing import Any, Dict, List
 
@@ -33,8 +34,10 @@ def validate_response(data: Any, expected_topk: int) -> List[Dict[str, Any]]:
         if not isinstance(contents, str) or not contents.strip():
             raise ValueError(f"Retriever result {index} document is missing non-empty contents.")
         score = item.get("score")
-        if not isinstance(score, (int, float)):
-            raise ValueError(f"Retriever result {index} is missing a numeric score.")
+        if isinstance(score, bool) or not isinstance(score, (int, float)):
+            raise ValueError(f"Retriever result {index} is missing a finite numeric score.")
+        if not math.isfinite(float(score)):
+            raise ValueError(f"Retriever result {index} is missing a finite numeric score.")
         validated.append(item)
     return validated
 

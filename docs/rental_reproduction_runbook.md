@@ -19,7 +19,7 @@ Smoke profile:
 - Ubuntu 20.04 or 22.04
 - 1 x A100 80GB
 - 64GB RAM minimum
-- 150GB disk minimum, 200GB recommended
+- 150GB total disk minimum, 200GB recommended; preflight requires 100 GiB free
 - Hourly billing
 
 Full profile:
@@ -43,7 +43,7 @@ git rev-parse HEAD
 
 ## Stage A: Single-GPU Smoke
 
-Check the host before installing anything:
+Check the host before installing the Search-R1 project environments. The selected cloud image must already provide Conda:
 
 ```bash
 python3 scripts/cloud_preflight.py --profile smoke
@@ -81,11 +81,18 @@ bash scripts/cloud_train_grpo_smoke.sh
 bash scripts/cloud_collect_evidence.sh smoke
 ```
 
-Smoke success means that the 2-step training path ran. It is not a paper reproduction result. If it fails, collect evidence and stop the paid instance.
+Smoke success means that the 2-step training path ran and created `artifacts/smoke_passed.txt`. It is not a paper reproduction result. Download that attestation with the evidence bundle. If smoke fails, collect evidence and stop the paid instance.
 
 ## Stage B: Eight-GPU Full Run
 
-Start a new full-profile instance and repeat clone and environment setup. Then run:
+Start a new full-profile instance and repeat clone and environment setup. Upload the smoke attestation from Stage A before continuing:
+
+```bash
+mkdir -p ~/Search-R1/artifacts
+cp /path/to/uploaded/smoke_passed.txt ~/Search-R1/artifacts/smoke_passed.txt
+```
+
+The attestation Git commit must match the full instance. Then run:
 
 ```bash
 python3 scripts/cloud_preflight.py --profile full
@@ -106,10 +113,10 @@ Detach and verify the API:
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate Search-R1
 python scripts/cloud_check_retriever.py
-head -n 3 artifacts/retriever_profile.txt
+grep '^profile=' artifacts/retriever_profile.txt
 ```
 
-The first marker line must be `full`. Start the expensive run only with explicit confirmation:
+The output must be `profile=full`. The official single-node configuration intentionally makes the FAISS retriever and training share all eight GPUs: the float16 index is sharded while training still uses GPUs 0-7. Preserve this for official-scale reproduction, monitor memory, and record any deviation. Start the expensive run only with explicit confirmation:
 
 ```bash
 CONFIRM_FULL_RUN=YES bash scripts/cloud_train_grpo_full.sh

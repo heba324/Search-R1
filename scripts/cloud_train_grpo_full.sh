@@ -17,6 +17,9 @@ GPUS_PER_NODE="${GPUS_PER_NODE:-8}"
 TRAINER_LOGGER="${TRAINER_LOGGER:-console}"
 PROFILE_MARKER="$REPO_ROOT/artifacts/retriever_profile.txt"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
+SMOKE_ATTESTATION="${SMOKE_ATTESTATION:-$REPO_ROOT/artifacts/smoke_passed.txt}"
+FULL_ATTESTATION="$REPO_ROOT/artifacts/full_completed.txt"
+ATTESTATION_TMP="$REPO_ROOT/artifacts/full_completed.txt.tmp"
 
 if [ "${CONFIRM_FULL_RUN:-}" != "YES" ]; then
   echo "CONFIRM_FULL_RUN must be YES before the expensive full run can start." >&2
@@ -26,9 +29,35 @@ fi
 
 "$PYTHON_BIN" scripts/cloud_preflight.py --profile full
 
-if [ ! -s "$PROFILE_MARKER" ] || [ "$(head -n 1 "$PROFILE_MARKER")" != "full" ]; then
+current_commit="$(git rev-parse HEAD)"
+if [ ! -s "$SMOKE_ATTESTATION" ] \
+    || ! grep -Fqx "status=passed" "$SMOKE_ATTESTATION" \
+    || ! grep -Fqx "mode=smoke" "$SMOKE_ATTESTATION" \
+    || ! grep -Fqx "git_commit=$current_commit" "$SMOKE_ATTESTATION"; then
+  echo "A successful smoke attestation is required for this Git commit." >&2
+  echo "Copy artifacts/smoke_passed.txt from the completed smoke instance." >&2
+  exit 1
+fi
+
+if [ ! -s "$PROFILE_MARKER" ] \
+    || ! grep -Fqx "profile=full" "$PROFILE_MARKER" \
+    || ! grep -Fqx "git_commit=$current_commit" "$PROFILE_MARKER" \
+    || ! grep -Fqx "index_file=$REPO_ROOT/data/wiki18/e5_Flat.index" "$PROFILE_MARKER" \
+    || ! grep -Fqx "corpus_file=$REPO_ROOT/data/wiki18/wiki-18.jsonl" "$PROFILE_MARKER"; then
   echo "The full run requires a running full retriever profile." >&2
   echo "Start it with: ASSET_PROFILE=full bash scripts/cloud_launch_retriever.sh" >&2
+  exit 1
+fi
+
+retriever_pid="$(sed -n 's/^pid=//p' "$PROFILE_MARKER" | head -n 1)"
+case "$retriever_pid" in
+  ''|*[!0-9]*)
+    echo "Retriever profile contains an invalid PID." >&2
+    exit 1
+    ;;
+esac
+if ! kill -0 "$retriever_pid" >/dev/null 2>&1; then
+  echo "Retriever profile PID is no longer running: $retriever_pid" >&2
   exit 1
 fi
 
@@ -51,6 +80,8 @@ source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "$SEARCH_ENV"
 
 python scripts/cloud_check_retriever.py
+mkdir -p "$REPO_ROOT/artifacts"
+rm -f "$FULL_ATTESTATION" "$ATTESTATION_TMP"
 
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}"
 export VLLM_ATTENTION_BACKEND="${VLLM_ATTENTION_BACKEND:-XFORMERS}"
@@ -109,3 +140,15 @@ export PYTHONUNBUFFERED=1
   retriever.url="http://127.0.0.1:8000/retrieve" \
   retriever.topk=3 \
   2>&1 | tee "$EXPERIMENT_NAME.log"
+
+cat > "$ATTESTATION_TMP" <<EOF
+status=completed
+mode=full
+git_commit=$current_commit
+experiment_name=$EXPERIMENT_NAME
+training_steps=1005
+completed_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+retriever_profile_sha256=$(sha256sum "$PROFILE_MARKER" | awk '{print $1}')
+EOF
+mv "$ATTESTATION_TMP" "$FULL_ATTESTATION"
+echo "Full-run completion attestation: $FULL_ATTESTATION"

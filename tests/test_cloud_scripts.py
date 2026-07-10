@@ -47,10 +47,36 @@ class CloudScriptContractTests(unittest.TestCase):
         self.assertIn('artifacts/retriever_profile.txt', script)
         self.assertNotIn('PORT="${PORT', script)
 
+    def test_retriever_profile_is_published_only_after_api_readiness(self):
+        script = self.read("cloud_launch_retriever.sh")
+        self.assertIn('RETRIEVER_READY_TIMEOUT=', script)
+        self.assertIn('SERVER_PID=$!', script)
+        self.assertIn('scripts/cloud_check_retriever.py', script)
+        self.assertIn('MARKER_TMP=', script)
+        self.assertIn('mv "$MARKER_TMP" "$PROFILE_MARKER"', script)
+        self.assertIn('wait "$SERVER_PID"', script)
+        self.assertLess(
+            script.index('scripts/cloud_check_retriever.py'),
+            script.index('mv "$MARKER_TMP" "$PROFILE_MARKER"'),
+        )
+
     def test_smoke_run_calls_smoke_preflight(self):
         script = self.read("cloud_train_grpo_smoke.sh")
         self.assertIn('cloud_preflight.py --profile smoke', script)
         self.assertIn('SEARCH_ENV="${SEARCH_ENV:-Search-R1}"', script)
+
+    def test_smoke_run_writes_success_attestation_after_training(self):
+        script = self.read("cloud_train_grpo_smoke.sh")
+        self.assertIn('artifacts/retriever_profile.txt', script)
+        self.assertIn('profile=smoke', script)
+        self.assertIn('artifacts/smoke_passed.txt', script)
+        self.assertIn('status=passed', script)
+        self.assertIn('kill -0 "$retriever_pid"', script)
+        self.assertIn('index_file=$REPO_ROOT/data/smoke_retriever/e5_Flat.index', script)
+        self.assertGreater(
+            script.index('status=passed'),
+            script.index('-m verl.trainer.main_ppo'),
+        )
 
     def test_training_python_is_overridable_for_preflight_testing(self):
         for name in ("cloud_train_grpo_smoke.sh", "cloud_train_grpo_full.sh"):
@@ -65,6 +91,12 @@ class CloudScriptContractTests(unittest.TestCase):
         self.assertIn('CONFIRM_FULL_RUN must be YES', script)
         self.assertIn('artifacts/retriever_profile.txt', script)
         self.assertIn('full retriever profile', script)
+        self.assertIn('artifacts/smoke_passed.txt', script)
+        self.assertIn('A successful smoke attestation is required', script)
+        self.assertIn('artifacts/full_completed.txt', script)
+        self.assertIn('kill -0 "$retriever_pid"', script)
+        self.assertIn('index_file=$REPO_ROOT/data/wiki18/e5_Flat.index', script)
+        self.assertIn('corpus_file=$REPO_ROOT/data/wiki18/wiki-18.jsonl', script)
 
     def test_console_logging_is_default(self):
         script = self.read("cloud_train_grpo_full.sh")
@@ -83,6 +115,22 @@ class CloudScriptContractTests(unittest.TestCase):
         ):
             self.assertIn(expected, script)
 
+    def test_full_downloads_use_pinned_hugging_face_integrity(self):
+        script = self.read("cloud_prepare_data_and_index.sh")
+        for expected in (
+            "42949672960",
+            "21609402413",
+            "5123307260",
+            "a8a6a246951da4bbc8771a223283ef61963882a32864d9044ec00abb90fc3023",
+            "b6d9bc943626fe7cb44de4c849e9379e7f272ab216c0552acbcf2390cc033c11",
+            "7abd929223399cd63c52b499f289bf4f9039be1e9f8c43e1cb3938305b2317db",
+        ):
+            self.assertIn(expected, script)
+        self.assertIn('sha256sum "$file"', script)
+        self.assertIn('RETRIEVER_ENV="${RETRIEVER_ENV:-Search-R1-retriever}"', script)
+        self.assertIn('faiss.read_index', script)
+        self.assertIn('downloads.sha256', script)
+
     def test_full_corpus_decompression_is_atomic(self):
         script = self.read("cloud_prepare_data_and_index.sh")
         self.assertIn('CORPUS_TMP=', script)
@@ -91,6 +139,8 @@ class CloudScriptContractTests(unittest.TestCase):
 
     def test_evidence_script_records_reproduction_metadata(self):
         script = self.read("cloud_collect_evidence.sh")
+        self.assertNotIn("git remote -v", script)
+        self.assertNotIn('for log_file in "$REPO_ROOT"/*.log', script)
         for expected in (
             'git rev-parse HEAD',
             'git status --short',
@@ -102,8 +152,13 @@ class CloudScriptContractTests(unittest.TestCase):
             'sha256sum',
             'train.parquet',
             'test.parquet',
-            '*.log',
             'verl_checkpoints',
+            'conda run -n "$SEARCH_ENV" python -m pip freeze',
+            'conda run -n "$RETRIEVER_ENV" python -m pip freeze',
+            'artifacts/smoke_passed.txt',
+            'artifacts/full_completed.txt',
+            'RUN_STATUS=not_completed',
+            'EXPECTED_LOG=',
         ):
             self.assertIn(expected, script)
         gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
@@ -114,24 +169,33 @@ class CloudScriptContractTests(unittest.TestCase):
             ROOT / "docs" / "beginner_cloud_reproduction_zh.md",
             ROOT / "docs" / "rental_reproduction_runbook.md",
         )
-        combined = "\n".join(path.read_text(encoding="utf-8") for path in paths)
-        for expected in (
-            "https://github.com/heba324/Search-R1",
-            "Search-R1-retriever",
-            "cloud_preflight.py --profile smoke",
-            "cloud_prepare_smoke_assets.sh",
-            "ASSET_PROFILE=full bash scripts/cloud_launch_retriever.sh",
-            "CONFIRM_FULL_RUN=YES bash scripts/cloud_train_grpo_full.sh",
-            "cloud_collect_evidence.sh",
-        ):
-            self.assertIn(expected, combined)
-        for obsolete in (
-            "conda activate searchr1",
-            "conda activate retriever",
-            "Search-R1-reproduce",
-            "你的用户名",
-        ):
-            self.assertNotIn(obsolete, combined)
+        for path in paths:
+            document = path.read_text(encoding="utf-8")
+            for expected in (
+                "https://github.com/heba324/Search-R1",
+                "Search-R1-retriever",
+                "cloud_preflight.py --profile smoke",
+                "cloud_prepare_smoke_assets.sh",
+                "ASSET_PROFILE=full bash scripts/cloud_launch_retriever.sh",
+                "CONFIRM_FULL_RUN=YES bash scripts/cloud_train_grpo_full.sh",
+                "cloud_collect_evidence.sh",
+                "smoke_passed.txt",
+                "profile=full",
+                "100 GiB",
+            ):
+                self.assertIn(expected, document, path.name)
+            for obsolete in (
+                "conda activate searchr1",
+                "conda activate retriever",
+                "Search-R1-reproduce",
+                "你的用户名",
+            ):
+                self.assertNotIn(obsolete, document, path.name)
+
+        chinese = paths[0].read_text(encoding="utf-8")
+        english = paths[1].read_text(encoding="utf-8")
+        self.assertIn("FAISS 与训练共享", chinese)
+        self.assertIn("FAISS retriever and training share", english)
 
     def test_cloud_shell_scripts_are_executable_in_git(self):
         output = subprocess.check_output(

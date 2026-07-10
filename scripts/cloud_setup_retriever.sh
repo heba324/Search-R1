@@ -27,7 +27,7 @@ conda activate "$ENV_NAME"
 conda install pytorch==2.4.0 torchvision==0.19.0 torchaudio==2.4.0 pytorch-cuda=12.1 -c pytorch -c nvidia -y
 conda install -c pytorch -c nvidia faiss-gpu=1.8.0 -y
 python -m pip install --upgrade pip
-python -m pip install "numpy<2" "transformers<4.48" "datasets<4" uvicorn fastapi huggingface_hub tqdm
+python -m pip install "numpy<2" "transformers<4.48" "datasets<4" requests uvicorn fastapi huggingface_hub tqdm
 python -m pip check
 
 python - <<'PY'

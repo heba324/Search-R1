@@ -35,6 +35,24 @@ class RetrieverResponseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "expected 3"):
             validate_response(payload, expected_topk=3)
 
+    def test_rejects_boolean_score(self):
+        payload = {
+            "result": [
+                [{"document": {"contents": '"Hamlet"\nText'}, "score": True}]
+            ]
+        }
+        with self.assertRaisesRegex(ValueError, "numeric score"):
+            validate_response(payload, expected_topk=1)
+
+    def test_rejects_non_finite_score(self):
+        payload = {
+            "result": [
+                [{"document": {"contents": '"Hamlet"\nText'}, "score": float("nan")}]
+            ]
+        }
+        with self.assertRaisesRegex(ValueError, "finite numeric score"):
+            validate_response(payload, expected_topk=1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -75,7 +75,7 @@ GPU：1 x A100 80GB
 计费：按小时
 ```
 
-`cloud_preflight.py --profile smoke` 的硬门槛是 1 张至少 75GiB 显存的 GPU、64GiB 内存和 100GiB 可用磁盘。页面上选择磁盘时应留安装和模型缓存余量，因此建议 200GB。
+`cloud_preflight.py --profile smoke` 的硬门槛是 1 张至少 75 GiB 显存的 GPU、64 GiB 内存和 100 GiB 可用磁盘。页面上选择磁盘时应留安装和模型缓存余量，因此建议购买至少 150GB 总磁盘，优先 200GB。
 
 ### 阶段 B：完整训练
 
@@ -123,7 +123,7 @@ apt-get update
 apt-get install -y git tmux
 ```
 
-如果缺少 Conda，最省事的做法是关闭实例，重新选择带 Anaconda/Miniconda 的镜像。
+预检要求云镜像已经带有 Conda；这里的“安装前预检”是指安装 Search-R1 项目环境之前。如果缺少 Conda，最省事的做法是关闭实例，重新选择带 Anaconda/Miniconda 的镜像。
 
 ## 5. 下载我们准备好的仓库
 
@@ -272,6 +272,14 @@ nq-search-r1-grpo-qwen2.5-3b-smoke.log
 
 只有看到训练正常结束到第 2 step，才能说“smoke 训练链路通过”。这仍然不是论文指标复现。
 
+成功结束后脚本还会生成：
+
+```text
+artifacts/smoke_passed.txt
+```
+
+这个文件绑定当前 Git 提交、实验名、训练步数和检索 profile。进入八卡阶段前必须把它与 smoke 证据一起下载到本地。
+
 ### 6.7 收集 smoke 证据
 
 不论成功或失败，都执行：
@@ -294,6 +302,15 @@ artifacts/reproduction-smoke-20260710T120000Z/
 ## 7. 阶段 B：运行八卡完整复现
 
 阶段 A 失败时不要进入阶段 B。阶段 A 通过后，再创建一台满足 full 配置的实例，从第 4 节重新连接并 clone 仓库。
+
+八卡实例 clone 完代码后，从本地上传单卡实例生成的凭证：
+
+```powershell
+ssh root@八卡服务器IP "mkdir -p ~/Search-R1/artifacts"
+scp .\smoke_passed.txt root@八卡服务器IP:~/Search-R1/artifacts/smoke_passed.txt
+```
+
+凭证中的 Git 提交必须与八卡实例相同；否则完整训练脚本会拒绝启动。
 
 ### 7.1 八卡预检
 
@@ -323,7 +340,7 @@ bash scripts/cloud_setup_retriever.sh 2>&1 | tee setup-retriever.log
 bash scripts/cloud_prepare_data_and_index.sh 2>&1 | tee prepare-full.log
 ```
 
-脚本会下载 `part_aa`、`part_ab` 和压缩 Wikipedia 语料，验证两个索引分片大小，原子拼接 `e5_Flat.index`，再原子解压语料。成功输出包括：
+脚本会下载 `part_aa`、`part_ab` 和压缩 Wikipedia 语料，按 Hugging Face LFS SHA-256 和固定字节数验证文件，原子拼接 `e5_Flat.index`，用 FAISS 实际加载索引，再原子解压语料。成功输出包括：
 
 ```text
 data/wiki18/e5_Flat.index
@@ -356,10 +373,10 @@ ASSET_PROFILE=full bash scripts/cloud_launch_retriever.sh 2>&1 | tee retriever-f
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate Search-R1
 python scripts/cloud_check_retriever.py
-head -n 3 artifacts/retriever_profile.txt
+grep '^profile=' artifacts/retriever_profile.txt
 ```
 
-`retriever_profile.txt` 第一行必须是 `full`。
+输出必须是 `profile=full`，并且 profile 中的 Git 提交必须与训练代码相同。
 
 ### 7.5 运行完整 GRPO
 
@@ -383,6 +400,8 @@ Wikipedia 2018 + E5 dense retriever
 每 100 step 保存 checkpoint
 每 50 step 验证
 ```
+
+为保持官方 Search-R1 单机配置，FAISS 与训练共享 8 张 GPU：FAISS 将 float16 索引分片到各卡，训练仍使用 GPU 0-7。不要擅自把训练改成 7 卡后仍称为官方配置；若 40GB 卡发生 OOM，先保存证据，再评估使用 80GB 卡或把任何资源调整写入报告。
 
 如需 WandB，先登录，再显式启用：
 
@@ -408,8 +427,10 @@ bash scripts/cloud_collect_evidence.sh full
 完整训练日志
 nvidia-smi.txt
 两个 Conda explicit 依赖文件
+两个 pip freeze 依赖文件
 data-sha256.txt
 retriever_profile.txt
+smoke_passed.txt 或 full_completed.txt
 checkpoint-files.txt
 verl_checkpoints/ 中的 checkpoint
 评测指标和 WandB 曲线（如果启用）
@@ -520,6 +541,9 @@ python3 scripts/cloud_preflight.py --profile full
 bash scripts/cloud_setup_searchr1.sh
 bash scripts/cloud_setup_retriever.sh
 bash scripts/cloud_prepare_data_and_index.sh
+
+mkdir -p artifacts
+cp /已上传的路径/smoke_passed.txt artifacts/smoke_passed.txt
 
 tmux new -s retriever
 ASSET_PROFILE=full bash scripts/cloud_launch_retriever.sh
