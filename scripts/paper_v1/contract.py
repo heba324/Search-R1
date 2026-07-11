@@ -38,11 +38,22 @@ REQUIRED_EVALUATION_DATASETS: Tuple[str, ...] = (
     "musique",
     "bamboogle",
 )
+PAPER_V1_TARGET_EM: Dict[str, float] = {
+    "nq": 0.323,
+    "triviaqa": 0.537,
+    "popqa": 0.364,
+    "hotpotqa": 0.308,
+    "2wikimultihopqa": 0.336,
+    "musique": 0.105,
+    "bamboogle": 0.315,
+}
 REQUIRED_ASSET_PATHS: Tuple[str, ...] = (
     "data/nq_hotpotqa_train/train.parquet",
     "data/nq_hotpotqa_train/test.parquet",
     "data/wiki18/e5_Flat.index",
     "data/wiki18/wiki-18.jsonl",
+    "data/models/Qwen2.5-3B-Instruct/config.json",
+    "data/models/e5-base-v2/config.json",
 )
 
 
