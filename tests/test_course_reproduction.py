@@ -72,8 +72,11 @@ class CourseReproductionContractTests(unittest.TestCase):
         launch = self.read_script("launch_bm25_retriever.sh")
         self.assertIn("PeterJinGo/wiki-18-bm25-index", prepare)
         self.assertIn("2c7554f", prepare)
+        self.assertIn("PeterJinGo/wiki-18-corpus", prepare)
+        self.assertIn("69c1c00", prepare)
         self.assertIn("bm25_server.py", launch)
         self.assertIn("--topk 3", launch)
+        self.assertIn("--corpus-path", launch)
         self.assertNotIn("--faiss_gpu", launch)
         self.assertIn("CUDA_VISIBLE_DEVICES=", launch)
 
@@ -83,6 +86,13 @@ class CourseReproductionContractTests(unittest.TestCase):
         self.assertIn("pyserini==0.25.0", script)
         self.assertIn("torch==2.4.0", script)
         self.assertIn("vllm==0.6.3", script)
+        self.assertIn("PIP_CACHE_DIR", script)
+
+    def test_large_downloads_and_dataset_cache_stay_on_workspace_disk(self):
+        for name in ("prepare_model.sh", "prepare_bm25_index.sh", "launch_bm25_retriever.sh"):
+            self.assertIn("HF_HOME", self.read_script(name), name)
+        eval_script = self.read_script("prepare_eval_data.py")
+        self.assertIn("HF_DATASETS_CACHE", eval_script)
 
     def test_model_download_is_revision_pinned(self):
         script = self.read_script("prepare_model.sh")
@@ -103,6 +113,11 @@ class CourseReproductionContractTests(unittest.TestCase):
         self.assertIn("data/course_eval/test.parquet", script)
         self.assertIn("+trainer.val_only=true", script)
         self.assertIn("algorithm.adv_estimator=grpo", script)
+        self.assertIn('--elapsed-seconds "$ELAPSED"', script)
+
+    def test_course_workflow_uses_course_retriever_gate(self):
+        for name in ("train_grpo.sh", "evaluate.sh"):
+            self.assertIn("scripts/course_reproduction/check_retriever.py", self.read_script(name), name)
 
     def test_resource_runbook_states_scientific_scope(self):
         doc = (self.repo_root / "docs" / "course_reproduction_zh.md").read_text(encoding="utf-8")
@@ -118,6 +133,8 @@ class CourseReproductionContractTests(unittest.TestCase):
             "七个数据集",
         ):
             self.assertIn(expected, doc)
+        self.assertIn("W&B step 121", doc)
+        self.assertIn("6 × 单次七数据集评测秒数", doc)
 
     def test_course_shell_entrypoints_are_executable(self):
         output = subprocess.check_output(
@@ -133,16 +150,25 @@ class CourseReproductionContractTests(unittest.TestCase):
         server = self.read_script("bm25_server.py")
         schema = self.read_script("bm25_schema.py")
         self.assertIn("LuceneSearcher", server)
-        self.assertIn('json.loads(raw)["contents"]', schema)
+        self.assertIn("load_dataset", server)
+        self.assertIn("from bm25_schema import document_from_raw", server)
+        self.assertIn("document_from_record(json.loads(raw))", schema)
         self.assertIn('@app.post("/retrieve")', server)
 
     def test_bm25_server_preserves_search_r1_document_schema(self):
-        from scripts.course_reproduction.bm25_schema import document_from_raw
+        from scripts.course_reproduction.bm25_schema import document_from_raw, document_from_record
 
         document = document_from_raw('{"contents": "\\\"Beijing\\\"\\nCapital of China."}')
         self.assertEqual(document["title"], "Beijing")
         self.assertEqual(document["text"], "Capital of China.")
         self.assertEqual(document["contents"], '"Beijing"\nCapital of China.')
+        self.assertEqual(document_from_record({"contents": '"Paris"\nCapital of France.'})["title"], "Paris")
+
+    def test_evidence_archive_does_not_hash_or_pack_itself(self):
+        script = self.read_script("collect_evidence.sh")
+        self.assertIn("-path \"$OUT\" -prune", script)
+        self.assertIn('TMP_ARCHIVE="$(mktemp', script)
+        self.assertIn('rm -f "$OUT/course-reproduction-evidence.tar.gz"', script)
 
 
 if __name__ == "__main__":

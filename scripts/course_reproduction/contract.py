@@ -28,6 +28,7 @@ REQUIRED_ASSETS = (
     "data/nq_hotpotqa_train/test.parquet",
     "data/models/Qwen2.5-1.5B-Instruct/config.json",
     "data/course_eval/test.parquet",
+    "data/wiki18_bm25/corpus/wiki-18.jsonl.gz",
 )
 
 

@@ -41,7 +41,7 @@ git rev-parse HEAD
 python3 scripts/course_reproduction/preflight.py
 ```
 
-不要克隆默认`main`，也不要使用严格论文分支启动资源版实验。
+必须在容量至少500GB的数据盘目录中执行克隆；脚本会把Pip、Hugging Face和Arrow缓存放到仓库的`data/`下。不要在只有几十GB的系统盘克隆，不要克隆默认`main`，也不要使用严格论文分支启动资源版实验。
 
 ## 4. 安装与下载
 
@@ -59,7 +59,7 @@ python scripts/course_reproduction/prepare_eval_data.py 2>&1 | tee prepare-eval.
 python3 scripts/course_reproduction/preflight.py --require-assets
 ```
 
-BM25索引约2.3GB并在CPU上运行，不占用A800显存。模型与索引均锁定Hugging Face revision。
+BM25索引约2.3GB，官方Wikipedia语料压缩包约5.12GB；首次启动时`datasets`还会生成更大的Arrow缓存，因此磁盘必须留足。检索完全在CPU运行，不占用A800显存。模型、索引与语料均锁定Hugging Face revision。
 
 ## 5. 启动检索服务
 
@@ -73,7 +73,7 @@ bash scripts/course_reproduction/launch_bm25_retriever.sh 2>&1 | tee bm25-retrie
 ```bash
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate Search-R1
-python scripts/paper_v1/check_retriever.py
+python scripts/course_reproduction/check_retriever.py
 ```
 
 检查器必须确认返回3篇有效文档。
@@ -122,12 +122,16 @@ bash scripts/course_reproduction/run_timing.sh
 cat artifacts/course-reproduction/course-timing/training_completed.txt
 ```
 
-正式训练估价公式：
+`pre-rl/evaluation_completed.json`会记录一次完整七数据集评测的`elapsed_seconds`。完整项目的保守估价公式为：
 
 ```text
-预计训练小时 = 十步elapsed_seconds ÷ 10 × 120 ÷ 3600
-预计训练费用 = 预计训练小时 × 实例每小时价格
+预计GPU秒数 = 十步elapsed_seconds ÷ 10 × 120
+              + 6 × 单次七数据集评测秒数
+              + 冒烟与十步测速实际秒数
+预计总费用 = 预计GPU秒数 ÷ 3600 × 实例每小时价格
 ```
+
+这里的6次完整评测包括Pre-RL一次、正式训练内部四次和Post-RL一次；环境安装与下载时间另加。不要只用十步耗时线性外推。
 
 若十步出现OOM，先将正式实验的`TRAIN_BATCH_SIZE`和`PPO_MINI_BATCH_SIZE`同时改为16，不要自行修改模型、搜索轮次或group size。
 
@@ -138,7 +142,7 @@ tmux new -s train
 bash scripts/course_reproduction/train_grpo.sh
 ```
 
-正式实验保存40、80、120步checkpoint，在0、50、100和最终120步进行验证。完成标记为：
+正式实验保存40、80、120步checkpoint，在0、50、100和完成120次参数更新后进行验证。上游训练器先将控制器计数加一再记录最终验证，因此最后一个验证点显示为 **W&B step 121**；这不代表训练了121次，最终模型仍是`global_step_120`。
 
 ```text
 artifacts/course-reproduction/search-r1-course-qwen2.5-1.5b-grpo-bm25/training_completed.txt

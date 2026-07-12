@@ -21,7 +21,13 @@ conda activate "${RETRIEVER_ENV:-Search-R1-retriever}"
 conda list > "$OUT/retriever-env-conda-list.txt"
 java -version 2> "$OUT/java-version.txt"
 
-find "$REPO_ROOT/artifacts/course-reproduction" -type f -print0 | sort -z | xargs -0 sha256sum > "$OUT/artifacts.sha256"
-tar --exclude='evidence/course-reproduction-evidence.tar.gz' -czf "$OUT/course-reproduction-evidence.tar.gz" \
+find "$REPO_ROOT/artifacts/course-reproduction" -path "$OUT" -prune -o -type f -print0 | \
+  sort -z | xargs -0 sha256sum > "$OUT/artifacts.sha256"
+rm -f "$OUT/course-reproduction-evidence.tar.gz"
+TMP_ARCHIVE="$(mktemp --suffix=.tar.gz)"
+trap 'rm -f "$TMP_ARCHIVE"' EXIT
+tar -czf "$TMP_ARCHIVE" \
   -C "$REPO_ROOT" artifacts/course-reproduction docs/course_reproduction_zh.md docs/research/resource_limited_reproduction.md
+mv "$TMP_ARCHIVE" "$OUT/course-reproduction-evidence.tar.gz"
+trap - EXIT
 echo "Evidence archive: $OUT/course-reproduction-evidence.tar.gz"

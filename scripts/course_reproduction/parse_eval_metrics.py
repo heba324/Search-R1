@@ -20,6 +20,7 @@ def main() -> None:
     parser.add_argument("log", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument("--run-name", required=True)
+    parser.add_argument("--elapsed-seconds", type=int, required=True)
     args = parser.parse_args()
     metrics = parse_metrics(args.log.read_text(encoding="utf-8", errors="replace"))
     missing = [name for name in REQUIRED_EVALUATION_DATASETS if name not in metrics]
@@ -31,6 +32,7 @@ def main() -> None:
         "scope": "resource-limited method reproduction; not paper-table numerical reproduction",
         "metrics": selected,
         "average_em": sum(selected.values()) / len(selected),
+        "elapsed_seconds": args.elapsed_seconds,
     }
     args.output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 

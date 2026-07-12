@@ -4,7 +4,11 @@ import json
 
 
 def document_from_raw(raw: str):
-    contents = json.loads(raw)["contents"]
+    return document_from_record(json.loads(raw))
+
+
+def document_from_record(record):
+    contents = record["contents"]
     lines = contents.split("\n")
     return {
         "title": lines[0].strip('"'),

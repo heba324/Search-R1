@@ -12,6 +12,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if os.fspath(REPO_ROOT) not in sys.path:
     sys.path.insert(0, os.fspath(REPO_ROOT))
+os.environ.setdefault("HF_HOME", os.fspath(REPO_ROOT / "data" / "huggingface"))
+os.environ.setdefault("HF_DATASETS_CACHE", os.fspath(REPO_ROOT / "data" / "huggingface" / "datasets"))
 
 from scripts.paper_v1.prepare_eval_data import DATASET_REPO, DATASET_REVISION, DATA_SOURCES, build_record
 

@@ -5,6 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SEARCH_ENV="${SEARCH_ENV:-Search-R1}"
 RETRIEVER_ENV="${RETRIEVER_ENV:-Search-R1-retriever}"
+export PIP_CACHE_DIR="${PIP_CACHE_DIR:-$REPO_ROOT/data/pip-cache}"
+mkdir -p "$PIP_CACHE_DIR"
 
 source "$(conda info --base)/etc/profile.d/conda.sh"
 if ! conda env list | awk '{print $1}' | grep -Fqx "$SEARCH_ENV"; then

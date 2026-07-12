@@ -32,7 +32,7 @@ rm -f "$MARKER" "$MARKER.tmp"
 python3 scripts/course_reproduction/preflight.py --repo-root "$REPO_ROOT" --require-assets
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "$SEARCH_ENV"
-python scripts/paper_v1/check_retriever.py
+python scripts/course_reproduction/check_retriever.py
 
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 export VLLM_ATTENTION_BACKEND=XFORMERS

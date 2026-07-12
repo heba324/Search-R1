@@ -21,11 +21,12 @@ rm -f "$MARKER" "$MARKER.tmp"
 python3 scripts/course_reproduction/preflight.py --repo-root "$REPO_ROOT" --require-assets
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "$SEARCH_ENV"
-python scripts/paper_v1/check_retriever.py
+python scripts/course_reproduction/check_retriever.py
 
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 export VLLM_ATTENTION_BACKEND=XFORMERS
 export PYTHONUNBUFFERED=1
+START_TIME="$(date +%s)"
 
 python3 -m verl.trainer.main_ppo \
   data.train_files="$EVAL_DATA" data.val_files="$EVAL_DATA" \
@@ -50,7 +51,8 @@ python3 -m verl.trainer.main_ppo \
   max_turns=4 retriever.url="http://127.0.0.1:8000/retrieve" retriever.topk=3 \
   2>&1 | tee "$LOG_FILE"
 
+ELAPSED="$(( $(date +%s) - START_TIME ))"
 python3 scripts/course_reproduction/parse_eval_metrics.py \
-  "$LOG_FILE" "$MARKER.tmp" --run-name "$EVAL_RUN_NAME"
+  "$LOG_FILE" "$MARKER.tmp" --run-name "$EVAL_RUN_NAME" --elapsed-seconds "$ELAPSED"
 mv "$MARKER.tmp" "$MARKER"
 echo "Evaluation completed: $MARKER"
