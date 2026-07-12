@@ -7,6 +7,8 @@ from typing import List
 
 @dataclass(frozen=True)
 class CourseReproductionContract:
+    paper_version: str = "arXiv v5 / COLM 2025"
+    baseline_commit: str = "eaa5a66c0ed779d195a4bd0e165f0c73b99f12de"
     model_id: str = "Qwen/Qwen2.5-1.5B-Instruct"
     model_revision: str = "989aa79"
     algorithm: str = "grpo"

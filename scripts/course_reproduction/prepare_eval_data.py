@@ -19,9 +19,11 @@ from scripts.paper_v1.prepare_eval_data import DATASET_REPO, DATASET_REVISION, D
 
 
 def select_indices(total: int, count: int, seed: int):
+    if total < count:
+        raise ValueError(f"Requested {count} examples from a dataset containing only {total}")
     indices = list(range(total))
     random.Random(seed).shuffle(indices)
-    return sorted(indices[: min(total, count)])
+    return sorted(indices[:count])
 
 
 def main() -> None:

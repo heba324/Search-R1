@@ -28,7 +28,7 @@ export VLLM_ATTENTION_BACKEND=XFORMERS
 export PYTHONUNBUFFERED=1
 START_TIME="$(date +%s)"
 
-python3 -m verl.trainer.main_ppo \
+python3 -m scripts.course_reproduction.main_ppo_with_behavior \
   data.train_files="$EVAL_DATA" data.val_files="$EVAL_DATA" \
   data.train_data_num=null data.val_data_num=null \
   data.train_batch_size=32 data.val_batch_size=32 \
@@ -53,6 +53,13 @@ python3 -m verl.trainer.main_ppo \
 
 ELAPSED="$(( $(date +%s) - START_TIME ))"
 python3 scripts/course_reproduction/parse_eval_metrics.py \
-  "$LOG_FILE" "$MARKER.tmp" --run-name "$EVAL_RUN_NAME" --elapsed-seconds "$ELAPSED"
+  "$LOG_FILE" "$MARKER.tmp" --run-name "$EVAL_RUN_NAME" --elapsed-seconds "$ELAPSED" \
+  --eval-data "$EVAL_DATA" --model-path "$MODEL_PATH"
 mv "$MARKER.tmp" "$MARKER"
+PRE_RL_MARKER="$REPO_ROOT/artifacts/course-reproduction/evaluation/pre-rl/evaluation_completed.json"
+if [ "$EVAL_RUN_NAME" = "post-rl" ] && [ -s "$PRE_RL_MARKER" ]; then
+  python3 scripts/course_reproduction/compare_evaluations.py \
+    "$PRE_RL_MARKER" "$MARKER" \
+    "$REPO_ROOT/artifacts/course-reproduction/evaluation/pre-post-comparison.json"
+fi
 echo "Evaluation completed: $MARKER"

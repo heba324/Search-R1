@@ -15,6 +15,11 @@ class CourseReproductionContractTests(unittest.TestCase):
     def test_contract_records_resource_limited_method_reproduction(self):
         from scripts.course_reproduction.contract import COURSE_REPRODUCTION
 
+        self.assertEqual(COURSE_REPRODUCTION.paper_version, "arXiv v5 / COLM 2025")
+        self.assertEqual(
+            COURSE_REPRODUCTION.baseline_commit,
+            "eaa5a66c0ed779d195a4bd0e165f0c73b99f12de",
+        )
         self.assertEqual(COURSE_REPRODUCTION.model_id, "Qwen/Qwen2.5-1.5B-Instruct")
         self.assertEqual(COURSE_REPRODUCTION.algorithm, "grpo")
         self.assertEqual(COURSE_REPRODUCTION.retriever, "bm25")
@@ -41,6 +46,8 @@ class CourseReproductionContractTests(unittest.TestCase):
     def test_host_preflight_requires_cloud_toolchain(self):
         script = self.read_script("preflight.py")
         self.assertIn('("conda", "git", "nvidia-smi", "nvcc", "tmux")', script)
+        self.assertIn("merge-base", script)
+        self.assertIn("baseline_commit", script)
 
     def test_training_cli_defaults_to_single_gpu_grpo(self):
         script = self.read_script("train_grpo.sh")
@@ -112,6 +119,8 @@ class CourseReproductionContractTests(unittest.TestCase):
         self.assertEqual(select_indices(10, 4, 42), select_indices(10, 4, 42))
         self.assertEqual(len(select_indices(10, 4, 42)), 4)
         self.assertNotEqual(select_indices(10, 4, 42), select_indices(10, 4, 43))
+        with self.assertRaises(ValueError):
+            select_indices(3, 4, 42)
 
     def test_evaluation_supports_pre_and_post_rl_models(self):
         script = self.read_script("evaluate.sh")
@@ -121,6 +130,57 @@ class CourseReproductionContractTests(unittest.TestCase):
         self.assertIn("+trainer.val_only=true", script)
         self.assertIn("algorithm.adv_estimator=grpo", script)
         self.assertIn('--elapsed-seconds "$ELAPSED"', script)
+        self.assertIn('--eval-data "$EVAL_DATA"', script)
+        self.assertIn('--model-path "$MODEL_PATH"', script)
+        self.assertIn("compare_evaluations.py", script)
+        self.assertIn("main_ppo_with_behavior", script)
+
+    def test_search_behavior_summary_counts_attempts_and_duplicates(self):
+        from scripts.course_reproduction.search_behavior import summarize_search_behavior
+
+        summary = summarize_search_behavior(
+            "<think>x</think><search>Alpha  Beta</search>"
+            "<information><search>document markup</search></information>"
+            "<search> alpha beta </search>"
+            "<search>   </search><answer>done</answer>"
+        )
+        self.assertEqual(summary["searches"], 3)
+        self.assertEqual(summary["valid_searches"], 2)
+        self.assertEqual(summary["duplicate_searches"], 1)
+        self.assertEqual(summary["invalid_searches"], 1)
+        self.assertEqual(summary["used_search"], 1)
+
+    def test_eval_parser_captures_search_behavior(self):
+        from scripts.course_reproduction.parse_eval_metrics import parse_search_behavior
+
+        parsed = parse_search_behavior(
+            "{'val/search_behavior/avg_searches/overall': 1.25, "
+            "'val/search_behavior/search_rate/overall': 0.75}"
+        )
+        self.assertEqual(parsed["overall"]["avg_searches"], 1.25)
+        self.assertEqual(parsed["overall"]["search_rate"], 0.75)
+
+    def test_pre_post_comparison_records_em_and_behavior_deltas(self):
+        from scripts.course_reproduction.compare_evaluations import compare_payloads
+
+        before = {
+            "metrics": {"nq": 0.2},
+            "search_behavior": {"nq": {"avg_searches": 2.0}},
+            "evaluation_data_sha256": "same-data",
+        }
+        after = {
+            "metrics": {"nq": 0.3},
+            "search_behavior": {"nq": {"avg_searches": 1.5}},
+            "evaluation_data_sha256": "same-data",
+        }
+        comparison = compare_payloads(before, after)
+        self.assertAlmostEqual(comparison["em_delta"]["nq"], 0.1)
+        self.assertEqual(
+            comparison["search_behavior_delta"]["nq"]["avg_searches"], -0.5
+        )
+        after["evaluation_data_sha256"] = "different-data"
+        with self.assertRaises(ValueError):
+            compare_payloads(before, after)
 
     def test_course_workflow_uses_course_retriever_gate(self):
         for name in ("train_grpo.sh", "evaluate.sh"):

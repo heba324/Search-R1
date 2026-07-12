@@ -17,7 +17,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if os.fspath(REPO_ROOT) not in sys.path:
     sys.path.insert(0, os.fspath(REPO_ROOT))
 
-from scripts.course_reproduction.contract import assess_assets
+from scripts.course_reproduction.contract import COURSE_REPRODUCTION, assess_assets
 
 MIN_RAM_GIB = 110
 MIN_DISK_GIB = 420
@@ -66,6 +66,30 @@ def collect_host_info(repo_root: Path) -> HostInfo:
     )
 
 
+def assess_repository(repo_root: Path) -> List[str]:
+    try:
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                os.fspath(repo_root),
+                "merge-base",
+                "--is-ancestor",
+                COURSE_REPRODUCTION.baseline_commit,
+                "HEAD",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.SubprocessError:
+        return [
+            "Current checkout does not descend from the course baseline commit "
+            f"{COURSE_REPRODUCTION.baseline_commit}."
+        ]
+    return []
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo-root", type=Path, default=REPO_ROOT)
@@ -77,6 +101,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     for command in ("conda", "git", "nvidia-smi", "nvcc", "tmux"):
         if shutil.which(command) is None:
             errors.append(f"Required command is unavailable: {command}")
+    if shutil.which("git"):
+        errors.extend(assess_repository(args.repo_root.resolve()))
     if platform.system() == "Linux" and shutil.which("nvidia-smi"):
         try:
             info = collect_host_info(args.repo_root)

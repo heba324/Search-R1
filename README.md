@@ -1,5 +1,12 @@
 # Search-R1: Train your LLMs to reason and call a search engine with reinforcement learning
 
+> **课程分支口径：** `codex/course-reproduction` 以第一篇 Search-R1 主论文的
+> **COLM 2025 / arXiv v5** 为理论对象，在 `eaa5a66` 课程基线上实现
+> Qwen2.5-1.5B-Instruct、GRPO、单张 A800 80GB 与 CPU BM25 的资源受限复现。
+> 它保留四轮推理—搜索、Top-3、检索 token 掩码和最终答案 EM 奖励，但不声称
+> 严格复现论文表格数值。仓库 v0.3 和第二篇经验研究只作为改进设计参考。
+> 操作入口见 [课程手册](docs/course_reproduction_zh.md)。
+
 <strong>Search-R1</strong> is an extension of <strong>DeepSeek-R1(-Zero)</strong> methods for <em>training reasoning and searching (tool-call) interleaved LLMs</em>. We built upon [veRL](https://github.com/volcengine/verl).
 
 Through RL (rule-based outcome reward), the 3B **base** LLM (both Qwen2.5-3b-base and Llama3.2-3b-base) develops reasoning and search engine calling abilities all on its own.
