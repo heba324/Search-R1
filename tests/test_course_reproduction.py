@@ -27,13 +27,20 @@ class CourseReproductionContractTests(unittest.TestCase):
         self.assertEqual(COURSE_REPRODUCTION.seed, 42)
 
     def test_course_host_requires_one_large_gpu(self):
-        from scripts.course_reproduction.preflight import HostInfo, assess_host
+        from scripts.course_reproduction.preflight import MIN_DISK_GIB, MIN_RAM_GIB, HostInfo, assess_host
 
-        self.assertEqual(assess_host(HostInfo(1, 80, 120, 500)), [])
-        message = "\n".join(assess_host(HostInfo(1, 40, 64, 200)))
+        self.assertEqual(MIN_RAM_GIB, 110)
+        self.assertEqual(MIN_DISK_GIB, 420)
+        self.assertEqual(assess_host(HostInfo(1, 80, 110, 420, 32)), [])
+        message = "\n".join(assess_host(HostInfo(1, 40, 109, 419, 31)))
         self.assertIn("80 GiB", message)
-        self.assertIn("120 GiB RAM", message)
-        self.assertIn("500 GiB", message)
+        self.assertIn("110 GiB RAM", message)
+        self.assertIn("420 GiB", message)
+        self.assertIn("32 GiB /dev/shm", message)
+
+    def test_host_preflight_requires_cloud_toolchain(self):
+        script = self.read_script("preflight.py")
+        self.assertIn('("conda", "git", "nvidia-smi", "nvcc", "tmux")', script)
 
     def test_training_cli_defaults_to_single_gpu_grpo(self):
         script = self.read_script("train_grpo.sh")
@@ -135,6 +142,9 @@ class CourseReproductionContractTests(unittest.TestCase):
             self.assertIn(expected, doc)
         self.assertIn("W&B step 121", doc)
         self.assertIn("6 × 单次七数据集评测秒数", doc)
+        self.assertIn("943机", doc)
+        self.assertIn("455GB", doc)
+        self.assertIn("/root/autodl-tmp", doc)
 
     def test_course_shell_entrypoints_are_executable(self):
         output = subprocess.check_output(

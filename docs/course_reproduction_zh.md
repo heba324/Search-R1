@@ -25,23 +25,37 @@
 
 ## 2. 租机要求
 
+- 推荐实例：AutoDL **943机**，1×A800 80GB，数据盘额外扩容455GB并拉满，标称总数据盘约505GB，按量计费约5.98元/小时（以创建页面实时价格为准）
 - Ubuntu 20.04或22.04
 - 1×NVIDIA A800 80GB，不能是MIG切分卡
-- 内存至少120GB，推荐192GB
-- 空闲磁盘至少500GB，推荐1TB
+- Linux实际可用内存至少110GiB
+- 仓库所在数据盘实际空闲空间至少420GiB；943机扩容后通常约460～470GiB可用
 - CUDA 12.1开发镜像，包含Conda、Git、GCC/G++和`nvcc`
 - `/dev/shm`至少32GB，容器优先使用`--ipc=host`
 
 ## 3. 克隆正确分支
 
 ```bash
+cd /root/autodl-tmp
 git clone --branch codex/course-reproduction https://github.com/heba324/Search-R1.git
 cd Search-R1
 git rev-parse HEAD
 python3 scripts/course_reproduction/preflight.py
 ```
 
-必须在容量至少500GB的数据盘目录中执行克隆；脚本会把Pip、Hugging Face和Arrow缓存放到仓库的`data/`下。不要在只有几十GB的系统盘克隆，不要克隆默认`main`，也不要使用严格论文分支启动资源版实验。
+必须在`/root/autodl-tmp`数据盘执行克隆；脚本会把Pip、Hugging Face和Arrow缓存放到仓库的`data/`下。不要在只有几十GB的系统盘克隆，不要克隆默认`main`，也不要使用严格论文分支启动资源版实验。
+
+943机开机后先不要安装，先检查：
+
+```bash
+nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader
+free -h
+df -h /root/autodl-tmp
+df -h /dev/shm
+nvcc --version
+```
+
+应看到A800 80GB、至少110GiB内存、`/root/autodl-tmp`至少420GiB可用空间、`/dev/shm`至少32GiB且`nvcc`正常。若数据盘仍只有约50GB，立即关机并回控制台完成455GB扩容，不要下载任何资源。
 
 ## 4. 安装与下载
 
