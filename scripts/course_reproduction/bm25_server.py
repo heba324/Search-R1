@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 from typing import List, Optional
 
 import uvicorn
@@ -12,7 +13,10 @@ from pydantic import BaseModel
 from pyserini.search.lucene import LuceneSearcher
 from datasets import load_dataset
 
-from bm25_schema import document_from_raw, document_from_record
+from bm25_schema import build_search_batches, document_from_raw, document_from_record
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class BM25Service:
@@ -32,17 +36,16 @@ class BM25Service:
 
     def batch_search(self, queries: List[str], topk: Optional[int], return_scores: bool):
         requested = topk or self.topk
-        batches = []
-        for query in queries:
-            hits = self.searcher.search(query, requested)
-            if len(hits) < requested:
-                raise RuntimeError(f"BM25 returned only {len(hits)} documents; expected {requested}.")
-            batch = []
-            for hit in hits[:requested]:
-                document = self.document_for_hit(hit)
-                batch.append({"document": document, "score": hit.score} if return_scores else document)
-            batches.append(batch)
-        return {"result": batches}
+        return build_search_batches(
+            queries,
+            requested=requested,
+            return_scores=return_scores,
+            search=self.searcher.search,
+            document_for_hit=self.document_for_hit,
+            on_query_error=lambda query, error: LOGGER.warning(
+                "BM25 rejected query %r: %s", query, error
+            ),
+        )
 
 
 class QueryRequest(BaseModel):

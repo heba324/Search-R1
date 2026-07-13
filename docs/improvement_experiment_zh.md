@@ -76,13 +76,23 @@ git rev-parse HEAD
 
 ## 5. 启动 BM25
 
-沿用复现阶段已经验证过的 Java 17 启动方式。先检查端口：
+先确保已有检索环境固定为Java 17：
 
 ```bash
-curl -s http://127.0.0.1:8000/health || true
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate Search-R1-retriever
+conda install -y -c conda-forge openjdk=17
 ```
 
-若服务未运行，在 tmux 中从原仓库启动原来成功的 Java 17 BM25 命令；然后在改进 worktree 验证：
+在改进worktree中启动版本化的检索脚本；脚本会在Conda激活后设置`JAVA_HOME`、更新`PATH`并拒绝非Java 17：
+
+```bash
+tmux new -s retriever
+cd /root/autodl-tmp/Search-R1-improvement
+bash scripts/course_reproduction/launch_bm25_retriever.sh 2>&1 | tee bm25-retriever.log
+```
+
+看到Uvicorn监听8000端口后，按`Ctrl+B`再按`D`，然后验证正常查询必须返回Top-3：
 
 ```bash
 cd /root/autodl-tmp/Search-R1-improvement
@@ -119,6 +129,8 @@ find verl_checkpoints/cegr-smoke -type d -name 'global_step_2' -print
 ```
 
 合格条件：有两行左右 `CEGR_METRICS`、marker 为 `status=completed`、存在 `global_step_2`、无 OOM/NaN/Traceback。
+
+冒烟与十步测速都保持7条验证样本，并使用验证batch 7；这只修复`drop_last=True`造成的零验证batch，不改变各自的训练batch。
 
 ## 8. 十步测速
 
@@ -177,6 +189,8 @@ artifacts/improvement/paired-statistical-analysis.json
 ```
 
 统计文件包含每数据集和总体的 EM/F1、差值、配对 bootstrap 95% CI、两个方向的翻转样本数和 exact McNemar p 值。
+
+配对评测使用batch 28完整覆盖700题。统计脚本在计算前强制要求：两边各700个唯一ID、七个数据集各100题且ID集合完全一致；任一条件不满足都会失败，不生成可用于报告的统计结论。正式120步训练及其内部验证仍保持baseline相同的验证batch 32。
 
 ## 11. 证据归档
 

@@ -13,6 +13,16 @@ export HF_DATASETS_CACHE="${HF_DATASETS_CACHE:-$REPO_ROOT/data/huggingface/datas
 [ -s "$CORPUS_PATH" ] || { echo "Missing Wikipedia corpus: $CORPUS_PATH" >&2; exit 1; }
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "$RETRIEVER_ENV"
+export JAVA_HOME="$CONDA_PREFIX"
+export PATH="$JAVA_HOME/bin:$PATH"
+JAVA_VERSION_OUTPUT="$(java -version 2>&1)"
+case "$JAVA_VERSION_OUTPUT" in
+  *'version "17.'*|*'version "17"'*) ;;
+  *)
+    printf 'Expected Java 17 in %s, but found:\n%s\n' "$RETRIEVER_ENV" "$JAVA_VERSION_OUTPUT" >&2
+    exit 1
+    ;;
+esac
 mkdir -p "$HF_DATASETS_CACHE"
 export CUDA_VISIBLE_DEVICES=
 export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:--Xms2g -Xmx16g}"

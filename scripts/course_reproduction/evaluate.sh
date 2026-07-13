@@ -10,6 +10,7 @@ TRAIN_RUN_NAME="${TRAIN_RUN_NAME:-search-r1-course-qwen2.5-1.5b-grpo-bm25}"
 MODEL_PATH="${MODEL_PATH:-$REPO_ROOT/verl_checkpoints/$TRAIN_RUN_NAME/actor/global_step_120}"
 EVAL_RUN_NAME="${EVAL_RUN_NAME:-post-rl}"
 EVAL_DATA="${EVAL_DATA:-$REPO_ROOT/data/course_eval/test.parquet}"
+EVAL_BATCH_SIZE="${EVAL_BATCH_SIZE:-28}"
 ARTIFACT_DIR="$REPO_ROOT/artifacts/course-reproduction/evaluation/$EVAL_RUN_NAME"
 LOG_FILE="$ARTIFACT_DIR/evaluation.log"
 MARKER="$ARTIFACT_DIR/evaluation_completed.json"
@@ -31,12 +32,12 @@ START_TIME="$(date +%s)"
 python3 -m scripts.course_reproduction.main_ppo_with_behavior \
   data.train_files="$EVAL_DATA" data.val_files="$EVAL_DATA" \
   data.train_data_num=null data.val_data_num=null \
-  data.train_batch_size=32 data.val_batch_size=32 \
+  data.train_batch_size="$EVAL_BATCH_SIZE" data.val_batch_size="$EVAL_BATCH_SIZE" \
   data.max_prompt_length=4096 data.max_response_length=500 \
   data.max_start_length=2048 data.max_obs_length=500 \
   algorithm.adv_estimator=grpo actor_rollout_ref.model.path="$MODEL_PATH" \
   actor_rollout_ref.model.use_remove_padding=True \
-  actor_rollout_ref.actor.ppo_mini_batch_size=32 actor_rollout_ref.actor.ppo_micro_batch_size=1 \
+  actor_rollout_ref.actor.ppo_mini_batch_size="$EVAL_BATCH_SIZE" actor_rollout_ref.actor.ppo_micro_batch_size=1 \
   actor_rollout_ref.actor.use_kl_loss=true actor_rollout_ref.actor.kl_loss_coef=0.001 \
   actor_rollout_ref.actor.kl_loss_type=low_var_kl \
   actor_rollout_ref.rollout.log_prob_micro_batch_size=4 \

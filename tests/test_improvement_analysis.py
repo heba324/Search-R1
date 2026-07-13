@@ -34,7 +34,14 @@ class ImprovementAnalysisTests(unittest.TestCase):
             {"example_id": "nq:2", "dataset": "nq", "em": 0.0, "f1": 0.5},
         ]
 
-        result = analyze_pairs(baseline, improved, bootstrap_samples=200, seed=42)
+        result = analyze_pairs(
+            baseline,
+            improved,
+            bootstrap_samples=200,
+            seed=42,
+            expected_datasets=("nq",),
+            expected_per_dataset=3,
+        )
 
         self.assertAlmostEqual(result["overall"]["em_delta"], 1.0 / 3.0)
         self.assertEqual(result["overall"]["baseline_wrong_improved_right"], 1)
@@ -49,7 +56,42 @@ class ImprovementAnalysisTests(unittest.TestCase):
         improved = [{"example_id": "nq:1", "dataset": "nq", "em": 1, "f1": 1}]
 
         with self.assertRaises(ValueError):
-            analyze_pairs(baseline, improved, bootstrap_samples=10, seed=42)
+            analyze_pairs(
+                baseline,
+                improved,
+                bootstrap_samples=10,
+                seed=42,
+                expected_datasets=("nq",),
+                expected_per_dataset=1,
+            )
+
+    def test_paired_analysis_rejects_duplicates_and_incomplete_dataset_counts(self):
+        from scripts.improvement.analyze_paired_results import analyze_pairs
+
+        duplicate = [
+            {"example_id": "nq:0", "dataset": "nq", "em": 0, "f1": 0},
+            {"example_id": "nq:0", "dataset": "nq", "em": 1, "f1": 1},
+        ]
+        with self.assertRaisesRegex(ValueError, "duplicate"):
+            analyze_pairs(
+                duplicate,
+                duplicate,
+                bootstrap_samples=10,
+                expected_datasets=("nq",),
+                expected_per_dataset=2,
+            )
+
+        one_row = [
+            {"example_id": "nq:0", "dataset": "nq", "em": 0, "f1": 0}
+        ]
+        with self.assertRaisesRegex(ValueError, "Expected 2"):
+            analyze_pairs(
+                one_row,
+                one_row,
+                bootstrap_samples=10,
+                expected_datasets=("nq",),
+                expected_per_dataset=2,
+            )
 
 
 if __name__ == "__main__":

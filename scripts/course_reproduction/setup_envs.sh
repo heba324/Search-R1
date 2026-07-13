@@ -25,7 +25,7 @@ if ! conda env list | awk '{print $1}' | grep -Fqx "$RETRIEVER_ENV"; then
   conda create -y -n "$RETRIEVER_ENV" python=3.10
 fi
 conda activate "$RETRIEVER_ENV"
-conda install -y -c conda-forge openjdk=21
+conda install -y -c conda-forge openjdk=17
 python -m pip install torch==2.4.0 --index-url https://download.pytorch.org/whl/cpu
 python -m pip install pyserini==0.25.0 faiss-cpu==1.8.0 'numpy<2' 'transformers<4.48' datasets uvicorn fastapi requests
 python -m pip check

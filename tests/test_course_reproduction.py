@@ -76,10 +76,12 @@ class CourseReproductionContractTests(unittest.TestCase):
         self.assertIn("TRAIN_BATCH_SIZE=8", smoke)
         self.assertIn("VAL_BEFORE_TRAIN=false", smoke)
         self.assertIn("VAL_DATA_NUM=7", smoke)
+        self.assertIn("VAL_BATCH_SIZE=7", smoke)
         self.assertIn("TOTAL_STEPS=10", timing)
         self.assertIn("TRAIN_BATCH_SIZE=32", timing)
         self.assertIn("VAL_BEFORE_TRAIN=false", timing)
         self.assertIn("VAL_DATA_NUM=7", timing)
+        self.assertIn("VAL_BATCH_SIZE=7", timing)
 
     def test_bm25_assets_and_server_are_cpu_only(self):
         prepare = self.read_script("prepare_bm25_index.sh")
@@ -96,11 +98,19 @@ class CourseReproductionContractTests(unittest.TestCase):
 
     def test_setup_installs_cpu_bm25_runtime(self):
         script = self.read_script("setup_envs.sh")
-        self.assertIn("openjdk=21", script)
+        self.assertIn("openjdk=17", script)
         self.assertIn("pyserini==0.25.0", script)
         self.assertIn("torch==2.4.0", script)
         self.assertIn("vllm==0.6.3", script)
         self.assertIn("PIP_CACHE_DIR", script)
+
+    def test_bm25_launcher_pins_java_17_after_conda_activation(self):
+        script = self.read_script("launch_bm25_retriever.sh")
+        activate = script.index('conda activate "$RETRIEVER_ENV"')
+        java_home = script.index('JAVA_HOME="$CONDA_PREFIX"')
+        self.assertLess(activate, java_home)
+        self.assertIn('PATH="$JAVA_HOME/bin:$PATH"', script)
+        self.assertIn("Expected Java 17", script)
 
     def test_large_downloads_and_dataset_cache_stay_on_workspace_disk(self):
         for name in ("prepare_model.sh", "prepare_bm25_index.sh", "launch_bm25_retriever.sh"):
@@ -221,18 +231,51 @@ class CourseReproductionContractTests(unittest.TestCase):
         schema = self.read_script("bm25_schema.py")
         self.assertIn("LuceneSearcher", server)
         self.assertIn("load_dataset", server)
-        self.assertIn("from bm25_schema import document_from_raw", server)
+        self.assertIn("build_search_batches", server)
+        self.assertIn("document_from_raw", server)
         self.assertIn("document_from_record(json.loads(raw))", schema)
         self.assertIn('@app.post("/retrieve")', server)
 
     def test_bm25_server_preserves_search_r1_document_schema(self):
-        from scripts.course_reproduction.bm25_schema import document_from_raw, document_from_record
+        from scripts.course_reproduction.bm25_schema import (
+            build_search_batches,
+            document_from_raw,
+            document_from_record,
+        )
 
         document = document_from_raw('{"contents": "\\\"Beijing\\\"\\nCapital of China."}')
         self.assertEqual(document["title"], "Beijing")
         self.assertEqual(document["text"], "Capital of China.")
         self.assertEqual(document["contents"], '"Beijing"\nCapital of China.')
         self.assertEqual(document_from_record({"contents": '"Paris"\nCapital of France.'})["title"], "Paris")
+
+        class Hit:
+            def __init__(self, docid, score):
+                self.docid = docid
+                self.score = score
+
+        def search(query, requested):
+            if query == "explode":
+                raise ValueError("query parser failure")
+            if query == "short":
+                return [Hit("only", 1.0)]
+            return [Hit(str(index), float(index)) for index in range(requested)]
+
+        result = build_search_batches(
+            ["", "explode", "short", "normal"],
+            requested=3,
+            return_scores=True,
+            search=search,
+            document_for_hit=lambda hit: {
+                "title": hit.docid,
+                "text": "text",
+                "contents": f'{hit.docid}\ntext',
+            },
+        )
+        self.assertEqual(result["result"][0], [])
+        self.assertEqual(result["result"][1], [])
+        self.assertEqual(len(result["result"][2]), 1)
+        self.assertEqual(len(result["result"][3]), 3)
 
     def test_evidence_archive_does_not_hash_or_pack_itself(self):
         script = self.read_script("collect_evidence.sh")

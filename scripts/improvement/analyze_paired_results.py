@@ -4,11 +4,14 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import json
 import math
 import random
 from pathlib import Path
 from statistics import fmean
+
+from scripts.paper_v1.contract import REQUIRED_EVALUATION_DATASETS
 
 
 def _mcnemar_exact(baseline_wrong_improved_right: int, reverse: int) -> float:
@@ -76,14 +79,41 @@ def _summarize(pairs, bootstrap_samples: int, seed: int):
     return summary
 
 
-def analyze_pairs(baseline, improved, bootstrap_samples: int = 10000, seed: int = 42):
-    baseline_by_id = {row["example_id"]: row for row in baseline}
-    improved_by_id = {row["example_id"]: row for row in improved}
+def _index_records(records, label, expected_datasets, expected_per_dataset):
+    expected_total = len(expected_datasets) * expected_per_dataset
+    if len(records) != expected_total:
+        raise ValueError(
+            f"Expected {expected_total} {label} records, found {len(records)}"
+        )
+    identifiers = [row["example_id"] for row in records]
+    if len(set(identifiers)) != len(identifiers):
+        raise ValueError(f"{label} evaluation contains duplicate example_id values")
+    counts = Counter(row["dataset"] for row in records)
+    expected_counts = {dataset: expected_per_dataset for dataset in expected_datasets}
+    if dict(counts) != expected_counts:
+        raise ValueError(
+            f"Expected {expected_per_dataset} rows for each dataset in {label}; "
+            f"found {dict(sorted(counts.items()))}"
+        )
+    return {row["example_id"]: row for row in records}
+
+
+def analyze_pairs(
+    baseline,
+    improved,
+    bootstrap_samples: int = 10000,
+    seed: int = 42,
+    expected_datasets=REQUIRED_EVALUATION_DATASETS,
+    expected_per_dataset: int = 100,
+):
+    baseline_by_id = _index_records(
+        baseline, "baseline", expected_datasets, expected_per_dataset
+    )
+    improved_by_id = _index_records(
+        improved, "improved", expected_datasets, expected_per_dataset
+    )
     if set(baseline_by_id) != set(improved_by_id):
         raise ValueError("Baseline and improved evaluations contain different examples")
-    if not baseline_by_id:
-        raise ValueError("Evaluation files are empty")
-
     pairs = []
     by_dataset = {}
     for example_id in sorted(baseline_by_id):
@@ -105,6 +135,12 @@ def analyze_pairs(baseline, improved, bootstrap_samples: int = 10000, seed: int 
 
     return {
         "scope": "paired fixed-subset Search-R1 baseline versus CEGR",
+        "evaluation_contract": {
+            "datasets": list(expected_datasets),
+            "examples_per_dataset": expected_per_dataset,
+            "total_examples": len(expected_datasets) * expected_per_dataset,
+            "unique_and_paired": True,
+        },
         "overall": _summarize(pairs, bootstrap_samples, seed),
         "groups": groups,
         "datasets": {

@@ -78,6 +78,8 @@ python scripts/course_reproduction/prepare_eval_data.py 2>&1 | tee prepare-eval.
 python3 scripts/course_reproduction/preflight.py --require-assets
 ```
 
+检索环境固定使用OpenJDK 17；启动脚本会在激活`Search-R1-retriever`之后设置`JAVA_HOME`和`PATH`并校验主版本。若已有旧环境曾安装Java 21，重新执行`setup_envs.sh`会将其切换到17。
+
 BM25索引约2.3GB，官方Wikipedia语料压缩包约5.12GB；首次启动时`datasets`还会生成更大的Arrow缓存，因此磁盘必须留足。检索完全在CPU运行，不占用A800显存。模型、索引与语料均锁定Hugging Face revision。
 
 ## 5. 启动检索服务
@@ -96,6 +98,8 @@ python scripts/course_reproduction/check_retriever.py
 ```
 
 检查器必须确认返回3篇有效文档。
+
+服务对模型生成的空查询、Lucene查询解析异常和少于Top-3的结果返回合法的空/短JSON，避免单条坏查询中断整批训练；上面的正常问题检查仍必须严格返回3篇，因此索引或服务损坏不会被该容错掩盖。
 
 ## 6. Pre-RL Baseline
 
@@ -127,6 +131,8 @@ bash scripts/course_reproduction/run_smoke.sh
 ```text
 artifacts/course-reproduction/course-smoke/training_completed.txt
 ```
+
+冒烟和十步测速都只抽取7条最终验证样本，并使用`VAL_BATCH_SIZE=7`，以适配上游验证DataLoader的`drop_last=True`。
 
 ## 8. 十步测速
 
@@ -181,6 +187,8 @@ Post-RL结果位于：
 ```text
 artifacts/course-reproduction/evaluation/post-rl/evaluation_completed.json
 ```
+
+独立固定评测使用batch 28，恰好完整覆盖`7 × 100 = 700`题；正式训练内部验证仍保留原baseline的batch 32，不改变训练配置或历史曲线口径。
 
 报告至少比较Pre-RL与Post-RL七项EM及平均EM，并报告GPU小时、训练用时和资源限制。证据包生成后下载到本地，再关机释放实例。
 
