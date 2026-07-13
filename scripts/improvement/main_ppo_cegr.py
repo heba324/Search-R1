@@ -3,7 +3,7 @@
 import hydra
 import ray
 
-from search_r1.improvements.cegr_manager import CEGRRewardManager
+from scripts.improvement.cegr_manager import CEGRRewardManager
 from verl.trainer.main_ppo import RewardManager
 
 

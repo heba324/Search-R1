@@ -3,7 +3,7 @@ import unittest
 
 class CEGRRewardTests(unittest.TestCase):
     def test_token_f1_gives_partial_credit_without_relaxing_exact_match(self):
-        from search_r1.improvements.cegr_reward import score_trajectory
+        from scripts.improvement.cegr_reward import score_trajectory
 
         result = score_trajectory(
             "<answer>McComb</answer>",
@@ -17,7 +17,7 @@ class CEGRRewardTests(unittest.TestCase):
         self.assertGreater(result.total, 0.0)
 
     def test_correct_answer_always_outranks_evidence_only_trajectory(self):
-        from search_r1.improvements.cegr_reward import score_trajectory
+        from scripts.improvement.cegr_reward import score_trajectory
 
         correct = score_trajectory(
             "<answer>McComb, Mississippi</answer>",
@@ -37,7 +37,7 @@ class CEGRRewardTests(unittest.TestCase):
         self.assertGreater(correct.total, evidence_only.total)
 
     def test_schedule_moves_weight_from_exploration_to_exactness(self):
-        from search_r1.improvements.cegr_reward import reward_weights
+        from scripts.improvement.cegr_reward import reward_weights
 
         early = reward_weights(step=1, total_steps=120)
         late = reward_weights(step=120, total_steps=120)
@@ -47,7 +47,7 @@ class CEGRRewardTests(unittest.TestCase):
         self.assertLess(early.behavior_penalty_weight, late.behavior_penalty_weight)
 
     def test_answer_coverage_requires_informative_gold_alias(self):
-        from search_r1.improvements.cegr_reward import evidence_answer_coverage
+        from scripts.improvement.cegr_reward import evidence_answer_coverage
 
         trajectory = "<information>Yes, the article discusses it.</information>"
         self.assertEqual(evidence_answer_coverage(trajectory, ["yes"]), 0.0)
@@ -60,7 +60,7 @@ class CEGRRewardTests(unittest.TestCase):
         )
 
     def test_invalid_duplicate_and_excess_searches_increase_penalty(self):
-        from search_r1.improvements.cegr_reward import search_behavior_penalty
+        from scripts.improvement.cegr_reward import search_behavior_penalty
 
         clean = search_behavior_penalty(
             "<search>Curious fragrance singer</search>"

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from search_r1.improvements.cegr_reward import (
+from scripts.improvement.cegr_reward import (
     evidence_answer_coverage,
     exact_match,
     extract_final_answer,

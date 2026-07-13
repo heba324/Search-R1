@@ -7,7 +7,7 @@ from statistics import mean
 
 import torch
 
-from search_r1.improvements.cegr_reward import score_trajectory
+from scripts.improvement.cegr_reward import score_trajectory
 from verl import DataProto
 
 
