@@ -186,7 +186,7 @@ bash scripts/course_reproduction/launch_bm25_retriever.sh
 cd "$V2_ROOT"
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate Search-R1
-python scripts/course_reproduction/check_retriever.py
+python -m scripts.course_reproduction.check_retriever
 ```
 
 检索检查失败时不要训练。可用 `tmux attach -t bm25` 查看服务报错。
@@ -217,10 +217,11 @@ global_step_2 checkpoint、日志、奖励指标和完成标记齐全
 ```bash
 cd "$V2_ROOT"
 cat artifacts/improvement-v2/search-r1-cegr-v2-eff-direct120-smoke/training_completed.txt
-python scripts/improvement_v2/verify_training_run.py \
+python -m scripts.improvement_v2.verify_training_run \
   --repo-root "$V2_ROOT" \
   --run-name search-r1-cegr-v2-eff-direct120-smoke \
   --method eff --steps 2 --group-size 5 --minimum-signal 0.10 \
+  --seed 42 \
   --initial-model "$V2_ROOT/data/models/Qwen2.5-1.5B-Instruct" \
   --train-batch-size 8 --learning-rate 1e-6 --lr-warmup-ratio 0.95
 ```
@@ -284,7 +285,7 @@ tmux ls
 cd "$V2_ROOT"
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate Search-R1
-python scripts/course_reproduction/check_retriever.py
+python -m scripts.course_reproduction.check_retriever
 ```
 
 开始两次固定 700 题评测：
@@ -325,6 +326,8 @@ comparison.overall.em_delta_bootstrap_95_ci
 comparison.overall.mcnemar_exact_p
 effectiveness.predeclared_success
 effectiveness.statistically_supported
+effectiveness.primary_metric_pass
+effectiveness.guardrails_pass
 effectiveness.claim_level
 causal_limit
 ```
@@ -342,6 +345,9 @@ directional_direct120_improvement
 
 not_effective_on_primary_metric
   必须写“未达到预注册主要指标门槛”，继续分析失败原因，不能宣称有效。
+
+primary_gain_with_guardrail_failure
+  EM 达到主要门槛，但至少一项次要安全护栏失败；必须准确报告是哪项护栏失败，不能写成完整改进成功。
 ```
 
 无论结果正负，都只能归因于“分组修复 + EFF 整体方案”。没有 Grouped-EM-120 新对照时，不能写“实验证明 F1 fallback 单独带来提升”。
@@ -350,9 +356,11 @@ not_effective_on_primary_metric
 
 ```bash
 cd "$V2_ROOT"
-bash scripts/improvement_v2/collect_evidence.sh
+REQUIRE_DIRECT120_CHECKPOINT=true bash scripts/improvement_v2/collect_evidence.sh
 ls -lh artifacts/improvement-v2/evidence/
 sha256sum -c artifacts/improvement-v2/evidence/search-r1-cegr-v2-evidence.tar.gz.sha256
+tar -tzf artifacts/improvement-v2/evidence/search-r1-cegr-v2-evidence.tar.gz | \
+  grep 'search-r1-cegr-v2-eff-direct120-qwen2.5-1.5b-grpo-bm25/actor/global_step_120/config.json'
 ```
 
 至少保存：
@@ -365,7 +373,16 @@ EFF120 的 global_step_120 checkpoint
 W&B 曲线或训练日志
 ```
 
-确认文件已经下载到本地并能校验 SHA-256 后，才关闭并释放云实例。
+紧急模式会在 checkpoint 缺失时直接失败，并将完整 `global_step_120` 放入证据压缩包。确认压缩包已经下载到本地、SHA-256 校验成功且上述 `tar -tzf` 能找到 checkpoint 后，才关闭并释放云实例。
+
+在你自己的 Windows PowerShell 中下载时，把尖括号内容替换为租机页面的 SSH 信息：
+
+```powershell
+scp -P <SSH端口> root@<服务器地址>:/root/autodl-tmp/Search-R1-cegr-v2/artifacts/improvement-v2/evidence/search-r1-cegr-v2-evidence.tar.gz .
+scp -P <SSH端口> root@<服务器地址>:/root/autodl-tmp/Search-R1-cegr-v2/artifacts/improvement-v2/evidence/search-r1-cegr-v2-evidence.tar.gz.sha256 .
+```
+
+若平台不开放 `scp`，使用平台文件管理器下载同名两个文件。checkpoint 已装入压缩包，不必再单独逐文件下载模型目录。
 
 ## 14. 报告中的准确表述
 

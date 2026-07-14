@@ -1,4 +1,5 @@
 import subprocess
+import sys
 import unittest
 from pathlib import Path
 
@@ -35,6 +36,20 @@ class CEGRV2Direct120Tests(unittest.TestCase):
         self.assertEqual(DIRECT120.lr_warmup_steps_ratio, 0.95)
         self.assertEqual(DIRECT120.minimum_em_gain, 0.02)
         self.assertEqual(DIRECT120.causal_estimand, "grouping_plus_eff")
+        self.assertEqual(DIRECT120.success.minimum_evidence_coverage_delta, -0.02)
+        self.assertEqual(DIRECT120.success.maximum_response_length_growth, 0.15)
+
+        payload = subprocess.check_output(
+            [
+                sys.executable,
+                str(REPO_ROOT / "scripts/improvement_v2/direct120_contract.py"),
+                "--json",
+            ],
+            cwd=REPO_ROOT,
+            text=True,
+        )
+        self.assertIn('"DIRECT120_GROUP_SIZE": 5', payload)
+        self.assertIn('"DIRECT120_SEED": 42', payload)
 
     def test_direct_training_is_equal_budget_from_the_original_qwen_model(self):
         smoke = (REPO_ROOT / "scripts/improvement_v2/run_direct120_smoke.sh").read_text(
@@ -45,18 +60,25 @@ class CEGRV2Direct120Tests(unittest.TestCase):
         )
 
         for script in (smoke, train):
-            self.assertIn("data/models/Qwen2.5-1.5B-Instruct", script)
-            self.assertIn("LEARNING_RATE=1e-6", script)
-            self.assertIn("LR_WARMUP_STEPS_RATIO=0.95", script)
-            self.assertIn("MODE=eff", script)
-        self.assertIn("TOTAL_STEPS=2", smoke)
-        self.assertIn("TOTAL_STEPS=120", train)
-        self.assertIn("SAVE_FREQ=40", train)
-        self.assertIn("verify_training_run.py", train)
-        self.assertIn("--learning-rate 1e-6", train)
-        self.assertIn("--lr-warmup-ratio 0.95", train)
-        self.assertIn("--train-batch-size 32", train)
-        self.assertIn("search-r1-cegr-v2-eff-direct120", train)
+            self.assertIn("direct120_contract.py", script)
+            self.assertIn("--shell", script)
+            self.assertIn('GROUP_SIZE="$DIRECT120_GROUP_SIZE"', script)
+            self.assertIn('SEED="$DIRECT120_SEED"', script)
+            self.assertIn('ROLLOUT_ENGINE_SEED="$DIRECT120_ROLLOUT_ENGINE_SEED"', script)
+            self.assertIn('MODE="$DIRECT120_REWARD_MODE"', script)
+            self.assertIn('--seed "$DIRECT120_SEED"', script)
+            self.assertIn(
+                '--rollout-engine-seed "$DIRECT120_ROLLOUT_ENGINE_SEED"',
+                script,
+            )
+            self.assertIn("-m scripts.improvement_v2.verify_training_run", script)
+        self.assertIn('TOTAL_STEPS="$DIRECT120_SMOKE_STEPS"', smoke)
+        self.assertIn('TOTAL_STEPS="$DIRECT120_TRAINING_STEPS"', train)
+        self.assertIn('SAVE_FREQ="$DIRECT120_SAVE_FREQ"', train)
+        self.assertIn("scripts.improvement_v2.verify_training_run", train)
+        self.assertIn('--learning-rate "$DIRECT120_LEARNING_RATE"', train)
+        self.assertIn('--lr-warmup-ratio "$DIRECT120_LR_WARMUP_RATIO"', train)
+        self.assertIn('--train-batch-size "$DIRECT120_TRAIN_BATCH_SIZE"', train)
 
     def test_beginner_manual_explains_baseline_reuse_and_single_arm_limit(self):
         manual = (
@@ -75,11 +97,13 @@ class CEGRV2Direct120Tests(unittest.TestCase):
             REPO_ROOT / "scripts/improvement_v2/evaluate_direct120.sh"
         ).read_text(encoding="utf-8")
 
-        self.assertIn("search-r1-course-qwen2.5-1.5b-grpo-bm25", script)
+        self.assertIn("DIRECT120_BASELINE_RUN", script)
         self.assertIn('evaluate_one baseline "$BASELINE_MODEL"', script)
         self.assertIn('evaluate_one cegr-v2-direct120 "$DIRECT_MODEL"', script)
-        self.assertIn("EVAL_BATCH_SIZE=28", script)
-        self.assertIn("direct120_analysis.py", script)
+        self.assertIn('EVAL_BATCH_SIZE="$DIRECT120_EVAL_BATCH_SIZE"', script)
+        self.assertIn('SEED="$DIRECT120_SEED"', script)
+        self.assertIn('ROLLOUT_ENGINE_SEED="$DIRECT120_ROLLOUT_ENGINE_SEED"', script)
+        self.assertIn("scripts.improvement_v2.direct120_analysis", script)
         self.assertNotIn("train_grpo.sh", script)
 
     def test_direct_final_requires_a_two_point_gain(self):
@@ -103,6 +127,12 @@ class CEGRV2Direct120Tests(unittest.TestCase):
         self.assertEqual(report["comparison"]["overall"]["em_delta"], 0.02)
         self.assertTrue(report["effectiveness"]["predeclared_success"])
         self.assertEqual(report["effectiveness"]["minimum_em_gain"], 0.02)
+        self.assertEqual(
+            report["effectiveness"]["success_criteria"][
+                "minimum_evidence_coverage_delta"
+            ],
+            -0.02,
+        )
 
         improved[0]["em"] = improved[0]["f1"] = 0.0
         report = analyze_direct120(
@@ -113,6 +143,60 @@ class CEGRV2Direct120Tests(unittest.TestCase):
             bootstrap_samples=100,
         )
         self.assertFalse(report["effectiveness"]["predeclared_success"])
+
+    def test_direct_final_distinguishes_primary_gain_from_guardrail_failure(self):
+        from scripts.improvement_v2.direct120_analysis import analyze_direct120
+
+        baseline = []
+        improved = []
+        for dataset in DATASETS:
+            for index in range(50):
+                baseline.append(_record(dataset, index, 0))
+                row = _record(
+                    dataset,
+                    index,
+                    int(index == 0 or (dataset == "nq" and index == 1)),
+                )
+                row["duplicate_searches"] = 0.03
+                improved.append(row)
+
+        report = analyze_direct120(
+            baseline,
+            improved,
+            expected_datasets=DATASETS,
+            expected_per_dataset=50,
+            bootstrap_samples=100,
+        )
+
+        self.assertEqual(report["comparison"]["overall"]["em_delta"], 0.03)
+        self.assertTrue(report["effectiveness"]["primary_metric_pass"])
+        self.assertFalse(report["effectiveness"]["guardrails_pass"])
+        self.assertEqual(
+            report["effectiveness"]["claim_level"],
+            "primary_gain_with_guardrail_failure",
+        )
+
+    def test_module_entrypoints_import_from_a_clean_checkout(self):
+        for module in (
+            "scripts.improvement_v2.verify_training_run",
+            "scripts.improvement_v2.direct120_analysis",
+        ):
+            completed = subprocess.run(
+                [sys.executable, "-m", module, "--help"],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_evidence_collector_can_require_and_pack_the_direct_checkpoint(self):
+        script = (
+            REPO_ROOT / "scripts/improvement_v2/collect_evidence.sh"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("REQUIRE_DIRECT120_CHECKPOINT", script)
+        self.assertIn("DIRECT120_CHECKPOINT", script)
+        self.assertIn("direct120-checkpoint.sha256", script)
 
     def test_direct_shell_entrypoints_are_executable(self):
         output = subprocess.check_output(

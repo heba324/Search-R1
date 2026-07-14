@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import asdict
 import json
 from pathlib import Path
 
@@ -35,6 +36,7 @@ def analyze_direct120(
         "equal-update original Search-R1 baseline versus group-corrected EFF120"
     )
     overall = comparison["overall"]
+    criteria = DIRECT120.success
     try:
         single_hop_delta = comparison["groups"]["single_hop"]["em_delta"]
         response_growth = overall["response_tokens_delta"] / max(
@@ -51,16 +53,17 @@ def analyze_direct120(
             f"Direct120 evaluation is missing required metric: {error}"
         ) from error
 
-    predeclared_success = (
-        overall["em_delta"] >= MINIMUM_EM_GAIN
-        and overall["f1_delta"] >= 0.0
-        and single_hop_delta >= 0.0
-        and required["evidence"] >= -0.02
-        and required["valid_searches"] >= -0.15
-        and required["searches"] <= 0.20
-        and required["duplicates"] <= 0.02
-        and response_growth <= 0.15
+    primary_metric_pass = overall["em_delta"] >= MINIMUM_EM_GAIN
+    guardrails_pass = (
+        overall["f1_delta"] >= criteria.minimum_f1_delta
+        and single_hop_delta >= criteria.minimum_single_hop_em_delta
+        and required["evidence"] >= criteria.minimum_evidence_coverage_delta
+        and required["valid_searches"] >= criteria.minimum_valid_searches_delta
+        and required["searches"] <= criteria.maximum_searches_delta
+        and required["duplicates"] <= criteria.maximum_duplicate_searches_delta
+        and response_growth <= criteria.maximum_response_length_growth
     )
+    predeclared_success = primary_metric_pass and guardrails_pass
     statistically_supported = (
         overall["em_delta_bootstrap_95_ci"][0] > 0.0
         and overall["mcnemar_exact_p"] < 0.05
@@ -69,8 +72,10 @@ def analyze_direct120(
         claim_level = "statistically_supported_direct120_improvement"
     elif predeclared_success:
         claim_level = "directional_direct120_improvement"
-    else:
+    elif not primary_metric_pass:
         claim_level = "not_effective_on_primary_metric"
+    else:
+        claim_level = "primary_gain_with_guardrail_failure"
     return {
         "protocol_id": DIRECT120.protocol_id,
         "scope": (
@@ -86,6 +91,9 @@ def analyze_direct120(
         "effectiveness": {
             "primary_metric": "exact_match",
             "minimum_em_gain": MINIMUM_EM_GAIN,
+            "success_criteria": asdict(criteria),
+            "primary_metric_pass": primary_metric_pass,
+            "guardrails_pass": guardrails_pass,
             "predeclared_success": predeclared_success,
             "statistically_supported": statistically_supported,
             "response_length_relative_delta": response_growth,

@@ -3,28 +3,40 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-BASE_MODEL="$REPO_ROOT/data/models/Qwen2.5-1.5B-Instruct"
-SMOKE_RUN="search-r1-cegr-v2-eff-direct120-smoke"
-RUN_NAME="search-r1-cegr-v2-eff-direct120-qwen2.5-1.5b-grpo-bm25"
+eval "$(python3 "$SCRIPT_DIR/direct120_contract.py" --shell)"
+BASE_MODEL="$REPO_ROOT/$DIRECT120_INITIAL_MODEL"
+SMOKE_RUN="$DIRECT120_SMOKE_RUN"
+RUN_NAME="$DIRECT120_TRAINING_RUN"
 ARTIFACT_DIR="$REPO_ROOT/artifacts/improvement-v2/$RUN_NAME"
 CHECKPOINT_DIR="$REPO_ROOT/verl_checkpoints/$RUN_NAME"
 
 cd "$REPO_ROOT"
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "${SEARCH_ENV:-Search-R1}"
-python scripts/improvement_v2/verify_pilot_data.py
-python scripts/improvement_v2/verify_training_run.py \
-  --repo-root "$REPO_ROOT" --run-name "$SMOKE_RUN" --method eff \
-  --steps 2 --group-size 5 --minimum-signal 0.10 \
-  --initial-model "$BASE_MODEL" --train-batch-size 8 \
-  --learning-rate 1e-6 --lr-warmup-ratio 0.95
+python -m scripts.improvement_v2.verify_pilot_data
+python -m scripts.improvement_v2.verify_training_run \
+  --repo-root "$REPO_ROOT" --run-name "$SMOKE_RUN" \
+  --method "$DIRECT120_REWARD_MODE" --steps "$DIRECT120_SMOKE_STEPS" \
+  --group-size "$DIRECT120_GROUP_SIZE" \
+  --seed "$DIRECT120_SEED" \
+  --rollout-engine-seed "$DIRECT120_ROLLOUT_ENGINE_SEED" \
+  --minimum-signal "$DIRECT120_MINIMUM_SMOKE_SIGNAL" \
+  --initial-model "$BASE_MODEL" \
+  --train-batch-size "$DIRECT120_SMOKE_BATCH_SIZE" \
+  --learning-rate "$DIRECT120_LEARNING_RATE" \
+  --lr-warmup-ratio "$DIRECT120_LR_WARMUP_RATIO"
 
 if [ -s "$ARTIFACT_DIR/training_completed.txt" ] && \
-   [ -s "$CHECKPOINT_DIR/actor/global_step_120/config.json" ]; then
-  python scripts/improvement_v2/verify_training_run.py \
-    --repo-root "$REPO_ROOT" --run-name "$RUN_NAME" --method eff \
-    --steps 120 --group-size 5 --initial-model "$BASE_MODEL" \
-    --train-batch-size 32 --learning-rate 1e-6 --lr-warmup-ratio 0.95
+   [ -s "$CHECKPOINT_DIR/actor/global_step_$DIRECT120_TRAINING_STEPS/config.json" ]; then
+  python -m scripts.improvement_v2.verify_training_run \
+    --repo-root "$REPO_ROOT" --run-name "$RUN_NAME" \
+    --method "$DIRECT120_REWARD_MODE" --steps "$DIRECT120_TRAINING_STEPS" \
+    --group-size "$DIRECT120_GROUP_SIZE" --seed "$DIRECT120_SEED" \
+    --rollout-engine-seed "$DIRECT120_ROLLOUT_ENGINE_SEED" \
+    --initial-model "$BASE_MODEL" \
+    --train-batch-size "$DIRECT120_TRAIN_BATCH_SIZE" \
+    --learning-rate "$DIRECT120_LEARNING_RATE" \
+    --lr-warmup-ratio "$DIRECT120_LR_WARMUP_RATIO"
   echo "Already completed; preserving direct EFF120 training."
   exit 0
 fi
@@ -33,12 +45,23 @@ if [ -e "$ARTIFACT_DIR" ] || [ -e "$CHECKPOINT_DIR" ]; then
   exit 1
 fi
 
-BASE_MODEL="$BASE_MODEL" MODE=eff TOTAL_STEPS=120 LEARNING_RATE=1e-6 \
-  LR_WARMUP_STEPS_RATIO=0.95 \
-  TRAIN_BATCH_SIZE=32 PPO_MINI_BATCH_SIZE=32 SAVE_FREQ=40 TEST_FREQ=0 \
+BASE_MODEL="$BASE_MODEL" MODE="$DIRECT120_REWARD_MODE" \
+  TOTAL_STEPS="$DIRECT120_TRAINING_STEPS" \
+  GROUP_SIZE="$DIRECT120_GROUP_SIZE" SEED="$DIRECT120_SEED" \
+  ROLLOUT_ENGINE_SEED="$DIRECT120_ROLLOUT_ENGINE_SEED" \
+  LEARNING_RATE="$DIRECT120_LEARNING_RATE" \
+  LR_WARMUP_STEPS_RATIO="$DIRECT120_LR_WARMUP_RATIO" \
+  TRAIN_BATCH_SIZE="$DIRECT120_TRAIN_BATCH_SIZE" \
+  PPO_MINI_BATCH_SIZE="$DIRECT120_TRAIN_BATCH_SIZE" \
+  SAVE_FREQ="$DIRECT120_SAVE_FREQ" TEST_FREQ=0 \
   RUN_NAME="$RUN_NAME" bash "$SCRIPT_DIR/train_refinement.sh"
 
-python scripts/improvement_v2/verify_training_run.py \
-  --repo-root "$REPO_ROOT" --run-name "$RUN_NAME" --method eff \
-  --steps 120 --group-size 5 --initial-model "$BASE_MODEL" \
-  --train-batch-size 32 --learning-rate 1e-6 --lr-warmup-ratio 0.95
+python -m scripts.improvement_v2.verify_training_run \
+  --repo-root "$REPO_ROOT" --run-name "$RUN_NAME" \
+  --method "$DIRECT120_REWARD_MODE" --steps "$DIRECT120_TRAINING_STEPS" \
+  --group-size "$DIRECT120_GROUP_SIZE" --seed "$DIRECT120_SEED" \
+  --rollout-engine-seed "$DIRECT120_ROLLOUT_ENGINE_SEED" \
+  --initial-model "$BASE_MODEL" \
+  --train-batch-size "$DIRECT120_TRAIN_BATCH_SIZE" \
+  --learning-rate "$DIRECT120_LEARNING_RATE" \
+  --lr-warmup-ratio "$DIRECT120_LR_WARMUP_RATIO"

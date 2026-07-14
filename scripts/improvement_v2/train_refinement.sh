@@ -55,11 +55,11 @@ MARKER="$ARTIFACT_DIR/training_completed.txt"
 [ ! -e "$ARTIFACT_DIR" ] || { echo "Refusing to overwrite V2 artifact directory: $ARTIFACT_DIR" >&2; exit 1; }
 
 mkdir -p "$ARTIFACT_DIR"
-python3 scripts/improvement_v2/freeze_v1.py --repo-root "$REPO_ROOT"
-python3 scripts/course_reproduction/preflight.py --repo-root "$REPO_ROOT" --require-assets
+python3 -m scripts.improvement_v2.freeze_v1 --repo-root "$REPO_ROOT"
+python3 -m scripts.course_reproduction.preflight --repo-root "$REPO_ROOT" --require-assets
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "$SEARCH_ENV"
-python scripts/course_reproduction/check_retriever.py
+python -m scripts.course_reproduction.check_retriever
 
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 export VLLM_ATTENTION_BACKEND=XFORMERS
@@ -106,7 +106,7 @@ python3 -m scripts.improvement_v2.main_ppo_refinement \
   max_turns=4 retriever.url="http://127.0.0.1:8000/retrieve" retriever.topk=3 \
   2>&1 | tee "$LOG_FILE"
 
-python3 scripts/improvement_v2/parse_v2_metrics.py \
+python3 -m scripts.improvement_v2.parse_v2_metrics \
   "$LOG_FILE" "$ARTIFACT_DIR/reward_metrics.json" \
   --minimum-informative-fallback-rate "$MIN_INFORMATIVE_FALLBACK_RATE" \
   --expected-steps "$TOTAL_STEPS" --expected-group-size "$GROUP_SIZE"
@@ -116,11 +116,11 @@ printf 'status=completed\nmethod=%s\ninitial_checkpoint=%s\ntraining_steps=%s\nt
   "$LEARNING_RATE" "$LR_WARMUP_STEPS_RATIO" "$SEED" \
   "$ROLLOUT_ENGINE_SEED" "$ELAPSED" > "$MARKER.tmp"
 mv "$MARKER.tmp" "$MARKER"
-if ! python3 scripts/improvement_v2/verify_training_run.py \
+if ! python3 -m scripts.improvement_v2.verify_training_run \
   --repo-root "$REPO_ROOT" --run-name "$RUN_NAME" --method "$MODE" \
   --steps "$TOTAL_STEPS" --group-size "$GROUP_SIZE" \
   --minimum-signal "$MIN_INFORMATIVE_FALLBACK_RATE" \
-  --rollout-engine-seed "$ROLLOUT_ENGINE_SEED"; then
+  --rollout-engine-seed "$ROLLOUT_ENGINE_SEED" --seed "$SEED"; then
   rm -f "$MARKER"
   exit 1
 fi

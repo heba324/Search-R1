@@ -7,9 +7,9 @@ cd "$REPO_ROOT"
 
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "${SEARCH_ENV:-Search-R1}"
-python scripts/improvement_v2/prepare_pilot_data.py
-python scripts/improvement_v2/verify_pilot_data.py
-python scripts/improvement_v2/verify_training_run.py \
+python -m scripts.improvement_v2.prepare_pilot_data
+python -m scripts.improvement_v2.verify_pilot_data
+python -m scripts.improvement_v2.verify_training_run \
   --repo-root "$REPO_ROOT" --run-name search-r1-cegr-v2-smoke \
   --method eff --steps 2 --group-size 5 --minimum-signal 0.10
 
@@ -19,7 +19,7 @@ run_arm() {
   local marker="$REPO_ROOT/artifacts/improvement-v2/$run_name/training_completed.txt"
   local checkpoint="$REPO_ROOT/verl_checkpoints/$run_name/actor/global_step_40/config.json"
   if [ -s "$marker" ] && [ -s "$checkpoint" ]; then
-    python scripts/improvement_v2/verify_training_run.py \
+    python -m scripts.improvement_v2.verify_training_run \
       --repo-root "$REPO_ROOT" --run-name "$run_name" \
       --method "$mode" --steps 40 --group-size 5
     echo "Already completed; preserving arm: $run_name"
@@ -32,7 +32,7 @@ run_arm() {
   fi
   MODE="$mode" TOTAL_STEPS=40 RUN_NAME="$run_name" \
     bash "$SCRIPT_DIR/train_refinement.sh"
-  python scripts/improvement_v2/verify_training_run.py \
+  python -m scripts.improvement_v2.verify_training_run \
     --repo-root "$REPO_ROOT" --run-name "$run_name" \
     --method "$mode" --steps 40 --group-size 5
 }

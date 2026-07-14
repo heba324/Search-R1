@@ -46,8 +46,8 @@ class CEGRV2ContractTests(unittest.TestCase):
 
         self.assertIn("run_arm grouped_em", script)
         self.assertIn("run_arm eff", script)
-        self.assertIn("prepare_pilot_data.py", script)
-        self.assertIn("verify_training_run.py", script)
+        self.assertIn("scripts.improvement_v2.prepare_pilot_data", script)
+        self.assertIn("scripts.improvement_v2.verify_training_run", script)
         self.assertIn("Partial arm found", script)
         self.assertIn("Already completed", script)
 
@@ -95,7 +95,7 @@ class CEGRV2ContractTests(unittest.TestCase):
 
         self.assertIn("data/improvement_v2/pilot.parquet", script)
         self.assertIn("MIN_INFORMATIVE_FALLBACK_RATE=0.10", script)
-        self.assertIn("verify_training_run.py", script)
+        self.assertIn("scripts.improvement_v2.verify_training_run", script)
         self.assertNotIn("data/course_eval/test.parquet", script)
 
     def test_v2_reward_manager_groups_rollouts_without_behavior_or_evidence_reward(self):
@@ -128,9 +128,9 @@ class CEGRV2ContractTests(unittest.TestCase):
             REPO_ROOT / "scripts/improvement_v2/prepare_experiment.sh"
         ).read_text(encoding="utf-8")
 
-        self.assertIn("freeze_v1.py --repo-root", script)
+        self.assertIn("scripts.improvement_v2.freeze_v1 --repo-root", script)
         self.assertIn("--initialize", script)
-        self.assertIn("prepare_pilot_data.py", script)
+        self.assertIn("scripts.improvement_v2.prepare_pilot_data", script)
         self.assertIn("unittest discover", script)
         self.assertIn("search_r1 verl", script)
         self.assertIn("scripts/improvement docs/improvement_experiment_zh.md", script)

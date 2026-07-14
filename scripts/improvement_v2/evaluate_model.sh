@@ -44,7 +44,7 @@ if marker.get("rollout_engine_seed") != engine_seed:
 PY
   TEMP_PARITY="$(mktemp)"
   trap 'rm -f "$TEMP_PARITY"' EXIT
-  python3 scripts/improvement_v2/verify_evaluation_records.py \
+  python3 -m scripts.improvement_v2.verify_evaluation_records \
     "$MARKER" "$TRAJECTORIES_PATH" "$TEMP_PARITY"
   rm -f "$TEMP_PARITY"
   trap - EXIT
@@ -56,10 +56,10 @@ if [ -e "$ARTIFACT_DIR" ] || [ -e "$TRAJECTORIES_PATH" ]; then
   exit 1
 fi
 mkdir -p "$ARTIFACT_DIR" "$(dirname "$TRAJECTORIES_PATH")"
-python3 scripts/course_reproduction/preflight.py --repo-root "$REPO_ROOT" --require-assets
+python3 -m scripts.course_reproduction.preflight --repo-root "$REPO_ROOT" --require-assets
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "$SEARCH_ENV"
-python scripts/course_reproduction/check_retriever.py
+python -m scripts.course_reproduction.check_retriever
 
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 export VLLM_ATTENTION_BACKEND=XFORMERS
@@ -97,7 +97,7 @@ python3 -m scripts.improvement_v2.main_ppo_refinement \
   2>&1 | tee "$LOG_FILE"
 
 ELAPSED="$(( $(date +%s) - START_TIME ))"
-python3 scripts/course_reproduction/parse_eval_metrics.py \
+python3 -m scripts.course_reproduction.parse_eval_metrics \
   "$LOG_FILE" "$MARKER.tmp" --run-name "$EVAL_RUN_NAME" \
   --elapsed-seconds "$ELAPSED" --eval-data "$EVAL_DATA" --model-path "$MODEL_PATH"
 python3 - "$MARKER.tmp" "$SEED" "$ROLLOUT_ENGINE_SEED" <<'PY'
@@ -112,7 +112,7 @@ payload["rollout_engine_seed"] = int(sys.argv[3])
 path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 PY
 [ -s "$TRAJECTORIES_PATH" ] || { echo "Evaluation produced no trajectory records" >&2; exit 1; }
-python3 scripts/improvement_v2/verify_evaluation_records.py \
+python3 -m scripts.improvement_v2.verify_evaluation_records \
   "$MARKER.tmp" "$TRAJECTORIES_PATH" "$PARITY"
 mv "$MARKER.tmp" "$MARKER"
 echo "CEGR V2 evaluation completed: $MARKER"

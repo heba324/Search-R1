@@ -11,13 +11,13 @@ V2_MODEL="$REPO_ROOT/verl_checkpoints/search-r1-cegr-v2-qwen2.5-1.5b-grpo-bm25/a
 PAIR_DIR="$REPO_ROOT/artifacts/improvement-v2/pilot-evaluation/step-$CHECKPOINT_STEP"
 
 cd "$REPO_ROOT"
-python3 scripts/improvement_v2/freeze_v1.py --repo-root "$REPO_ROOT"
-python3 scripts/improvement_v2/verify_pilot_data.py
-python3 scripts/improvement_v2/verify_training_run.py \
+python3 -m scripts.improvement_v2.freeze_v1 --repo-root "$REPO_ROOT"
+python3 -m scripts.improvement_v2.verify_pilot_data
+python3 -m scripts.improvement_v2.verify_training_run \
   --repo-root "$REPO_ROOT" \
   --run-name search-r1-cegr-v2-em-control-qwen2.5-1.5b-grpo-bm25 \
   --method grouped_em --steps 40 --group-size 5
-python3 scripts/improvement_v2/verify_training_run.py \
+python3 -m scripts.improvement_v2.verify_training_run \
   --repo-root "$REPO_ROOT" \
   --run-name search-r1-cegr-v2-qwen2.5-1.5b-grpo-bm25 \
   --method eff --steps 40 --group-size 5
@@ -35,10 +35,10 @@ evaluate_one baseline "$BASELINE_MODEL"
 evaluate_one em-control "$CONTROL_MODEL"
 evaluate_one cegr-v2 "$V2_MODEL"
 
-python3 "$SCRIPT_DIR/pilot_gate.py" \
+python3 -m scripts.improvement_v2.pilot_gate \
   "$PAIR_DIR/baseline.jsonl" "$PAIR_DIR/em-control.jsonl" "$PAIR_DIR/cegr-v2.jsonl" \
   "$PAIR_DIR/pilot-gate.json" --expected-per-dataset 20
-python3 "$SCRIPT_DIR/verify_pilot_gate.py" \
+python3 -m scripts.improvement_v2.verify_pilot_gate \
   "$PAIR_DIR/pilot-gate.json" "$PAIR_DIR/baseline.jsonl" \
   "$PAIR_DIR/em-control.jsonl" "$PAIR_DIR/cegr-v2.jsonl" \
   --expected-per-dataset 20

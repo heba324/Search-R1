@@ -29,9 +29,9 @@ class CEGRV2EvaluationContractTests(unittest.TestCase):
         self.assertIn("em-control", script)
         self.assertIn("cegr-v2", script)
         self.assertIn("EVAL_BATCH_SIZE=20", script)
-        self.assertIn("verify_training_run.py", script)
-        self.assertIn("pilot_gate.py", script)
-        self.assertIn("verify_pilot_gate.py", script)
+        self.assertIn("scripts.improvement_v2.verify_training_run", script)
+        self.assertIn("scripts.improvement_v2.pilot_gate", script)
+        self.assertIn("scripts.improvement_v2.verify_pilot_gate", script)
 
     def test_final_evaluation_uses_all_700_examples_and_both_comparators(self):
         script = (REPO_ROOT / "scripts/improvement_v2/evaluate_final.sh").read_text(
@@ -43,15 +43,15 @@ class CEGRV2EvaluationContractTests(unittest.TestCase):
         self.assertIn("baseline", script)
         self.assertIn("em-control", script)
         self.assertIn("cegr-v2", script)
-        self.assertIn("final_analysis.py", script)
+        self.assertIn("scripts.improvement_v2.final_analysis", script)
         self.assertIn("artifacts/improvement/paired-evaluation/baseline.jsonl", script)
         self.assertIn('evaluate_one baseline "$BASELINE_MODEL"', script)
         self.assertIn("historical-baseline-rescored.jsonl", script)
-        self.assertIn("verify_pilot_data.py", script)
-        self.assertIn("verify_pilot_gate.py", script)
+        self.assertIn("scripts.improvement_v2.verify_pilot_data", script)
+        self.assertIn("scripts.improvement_v2.verify_pilot_gate", script)
         self.assertNotIn('python3 "$SCRIPT_DIR/pilot_gate.py"', script)
         self.assertIn('--pilot-gate "$PILOT_GATE"', script)
-        self.assertIn("rescore_frozen_baseline.py", script)
+        self.assertIn("scripts.improvement_v2.rescore_frozen_baseline", script)
 
     def test_v2_evaluation_record_uses_strict_answer_tags(self):
         from scripts.improvement_v2.evaluation_record import build_evaluation_record

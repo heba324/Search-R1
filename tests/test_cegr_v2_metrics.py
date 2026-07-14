@@ -99,7 +99,7 @@ class CEGRV2MetricsTests(unittest.TestCase):
             (checkpoint / "config.json").write_text("{}\n", encoding="utf-8")
             (artifact / "training_completed.txt").write_text(
                 "status=completed\nmethod=eff\ntraining_steps=2\ngroup_size=5\n"
-                "rollout_engine_seed=42\ntrain_batch_size=8\n"
+                "seed=42\nrollout_engine_seed=42\ntrain_batch_size=8\n"
                 "learning_rate=1e-6\nlr_warmup_steps_ratio=0.95\n",
                 encoding="utf-8",
             )
@@ -148,11 +148,20 @@ class CEGRV2MetricsTests(unittest.TestCase):
                     2,
                     5,
                     minimum_signal=0.1,
+                    seed=42,
                     train_batch_size=8,
                     learning_rate=1e-6,
                     lr_warmup_ratio=0.95,
                 ),
                 [],
+            )
+            self.assertTrue(
+                any(
+                    "driver seed" in error
+                    for error in verify_training_run(
+                        root, run_name, "eff", 2, 5, seed=7
+                    )
+                )
             )
             self.assertTrue(
                 any(

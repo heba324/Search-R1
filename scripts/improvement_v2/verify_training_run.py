@@ -32,6 +32,7 @@ def verify_training_run(
     group_size,
     minimum_signal=0.0,
     rollout_engine_seed=42,
+    seed=None,
     initial_model=None,
     train_batch_size=None,
     learning_rate=None,
@@ -86,6 +87,8 @@ def verify_training_run(
         errors.append(
             f"training marker does not record vLLM engine seed {rollout_engine_seed}"
         )
+    if seed is not None and marker.get("seed") != str(seed):
+        errors.append(f"training marker does not record driver seed {seed}")
     if initial_model is not None:
         recorded_initial = marker.get("initial_checkpoint")
         if recorded_initial is None or Path(recorded_initial).resolve() != Path(
@@ -145,6 +148,7 @@ def main():
     parser.add_argument("--group-size", type=int, default=5)
     parser.add_argument("--minimum-signal", type=float, default=0.0)
     parser.add_argument("--rollout-engine-seed", type=int, default=42)
+    parser.add_argument("--seed", type=int)
     parser.add_argument("--initial-model", type=Path)
     parser.add_argument("--train-batch-size", type=int)
     parser.add_argument("--learning-rate", type=float)
@@ -158,6 +162,7 @@ def main():
         args.group_size,
         args.minimum_signal,
         args.rollout_engine_seed,
+        args.seed,
         args.initial_model,
         args.train_batch_size,
         args.learning_rate,

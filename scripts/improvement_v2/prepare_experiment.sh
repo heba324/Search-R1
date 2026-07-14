@@ -12,10 +12,10 @@ git status --short --branch > artifacts/improvement-v2/preflight/git-status.txt
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "${SEARCH_ENV:-Search-R1}"
 
-python3 scripts/improvement_v2/freeze_v1.py --repo-root "$REPO_ROOT" --initialize
-python3 scripts/improvement_v2/freeze_v1.py --repo-root "$REPO_ROOT"
-python3 scripts/improvement_v2/prepare_pilot_data.py
-python3 scripts/improvement_v2/verify_pilot_data.py
+python3 -m scripts.improvement_v2.freeze_v1 --repo-root "$REPO_ROOT" --initialize
+python3 -m scripts.improvement_v2.freeze_v1 --repo-root "$REPO_ROOT"
+python3 -m scripts.improvement_v2.prepare_pilot_data
+python3 -m scripts.improvement_v2.verify_pilot_data
 python3 -m unittest discover -s tests -v 2>&1 | \
   tee artifacts/improvement-v2/preflight/unittest.log
 python3 -m compileall -q scripts/improvement_v2

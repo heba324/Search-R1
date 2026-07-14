@@ -13,9 +13,9 @@ PILOT_GATE="$REPO_ROOT/artifacts/improvement-v2/pilot-evaluation/step-$CHECKPOIN
 PAIR_DIR="$REPO_ROOT/artifacts/improvement-v2/final-evaluation/step-$CHECKPOINT_STEP"
 
 cd "$REPO_ROOT"
-python3 scripts/improvement_v2/freeze_v1.py --repo-root "$REPO_ROOT"
-python3 scripts/improvement_v2/verify_pilot_data.py
-python3 "$SCRIPT_DIR/verify_pilot_gate.py" \
+python3 -m scripts.improvement_v2.freeze_v1 --repo-root "$REPO_ROOT"
+python3 -m scripts.improvement_v2.verify_pilot_data
+python3 -m scripts.improvement_v2.verify_pilot_gate \
   "$PILOT_GATE" \
   "$REPO_ROOT/artifacts/improvement-v2/pilot-evaluation/step-$CHECKPOINT_STEP/baseline.jsonl" \
   "$REPO_ROOT/artifacts/improvement-v2/pilot-evaluation/step-$CHECKPOINT_STEP/em-control.jsonl" \
@@ -34,7 +34,7 @@ PY
 
 [ -s "$HISTORICAL_BASELINE" ] || { echo "Missing frozen V1 baseline records: $HISTORICAL_BASELINE" >&2; exit 1; }
 mkdir -p "$PAIR_DIR"
-python3 "$SCRIPT_DIR/rescore_frozen_baseline.py" \
+python3 -m scripts.improvement_v2.rescore_frozen_baseline \
   "$HISTORICAL_BASELINE" "$PAIR_DIR/historical-baseline-rescored.jsonl" \
   --report "$PAIR_DIR/baseline-rescore.json" --expected-per-dataset 100
 
@@ -51,7 +51,7 @@ evaluate_one baseline "$BASELINE_MODEL"
 evaluate_one em-control "$CONTROL_MODEL"
 evaluate_one cegr-v2 "$V2_MODEL"
 
-python3 "$SCRIPT_DIR/final_analysis.py" \
+python3 -m scripts.improvement_v2.final_analysis \
   "$PAIR_DIR/baseline.jsonl" "$PAIR_DIR/em-control.jsonl" "$PAIR_DIR/cegr-v2.jsonl" \
   "$PAIR_DIR/final-analysis.json" --expected-per-dataset 100 \
   --bootstrap-samples 10000 --seed 42 --pilot-gate "$PILOT_GATE"
