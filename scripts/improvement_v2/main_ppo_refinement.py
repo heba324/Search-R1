@@ -57,12 +57,11 @@ def main_task(config):
 
     if config.actor_rollout_ref.actor.strategy == "fsdp":
         assert config.actor_rollout_ref.actor.strategy == config.critic.strategy
-        from scripts.improvement_v2.seeded_worker import (
-            CEGRV2ActorRolloutRefWorker as ActorRolloutRefWorker,
-        )
-        from verl.workers.fsdp_workers import CriticWorker
+        from scripts.improvement_v2.seeded_worker import install_seeded_rollout_patch
+        from verl.workers.fsdp_workers import ActorRolloutRefWorker, CriticWorker
         from verl.single_controller.ray import RayWorkerGroup
 
+        ActorRolloutRefWorker = install_seeded_rollout_patch(ActorRolloutRefWorker)
         ray_worker_group_cls = RayWorkerGroup
     elif config.actor_rollout_ref.actor.strategy == "megatron":
         assert config.actor_rollout_ref.actor.strategy == config.critic.strategy

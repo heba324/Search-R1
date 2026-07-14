@@ -67,7 +67,15 @@ class CEGRV2ContractTests(unittest.TestCase):
         )
         self.assertIn("torch.manual_seed(seed)", entrypoint)
         self.assertIn("np.random.seed(seed)", entrypoint)
-        self.assertIn("CEGRV2ActorRolloutRefWorker as ActorRolloutRefWorker", entrypoint)
+        self.assertIn("install_seeded_rollout_patch", entrypoint)
+        self.assertNotIn("CEGRV2ActorRolloutRefWorker", entrypoint)
+
+    def test_preflight_checks_ray_colocation_compatibility(self):
+        script = (
+            REPO_ROOT / "scripts/improvement_v2/prepare_experiment.sh"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("scripts.improvement_v2.verify_ray_colocation", script)
 
     def test_vllm_engine_seed_is_not_mistaken_for_a_sampling_seed(self):
         from types import SimpleNamespace

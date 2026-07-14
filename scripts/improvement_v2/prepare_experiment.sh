@@ -16,6 +16,7 @@ python3 -m scripts.improvement_v2.freeze_v1 --repo-root "$REPO_ROOT" --initializ
 python3 -m scripts.improvement_v2.freeze_v1 --repo-root "$REPO_ROOT"
 python3 -m scripts.improvement_v2.prepare_pilot_data
 python3 -m scripts.improvement_v2.verify_pilot_data
+python3 -m scripts.improvement_v2.verify_ray_colocation
 python3 -m unittest discover -s tests -v 2>&1 | \
   tee artifacts/improvement-v2/preflight/unittest.log
 python3 -m compileall -q scripts/improvement_v2
