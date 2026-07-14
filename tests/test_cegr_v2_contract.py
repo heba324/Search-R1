@@ -76,6 +76,7 @@ class CEGRV2ContractTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn("scripts.improvement_v2.verify_ray_colocation", script)
+        self.assertIn("PYTHONDONTWRITEBYTECODE=1", script)
 
     def test_vllm_engine_seed_is_not_mistaken_for_a_sampling_seed(self):
         from types import SimpleNamespace
