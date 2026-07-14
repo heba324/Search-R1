@@ -32,6 +32,7 @@ tar --exclude='artifacts/improvement-v2/evidence/search-r1-cegr-v2-evidence.tar.
   artifacts/improvement-v2 \
   data/improvement_v2/pilot_manifest.json \
   docs/cegr_v2_experiment_zh.md \
+  docs/cegr_v2_direct120_urgent_zh.md \
   docs/research/cegr_v2_literature_review.md
 mv "$TMP_ARCHIVE" "$ARCHIVE"
 trap - EXIT

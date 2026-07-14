@@ -99,7 +99,8 @@ class CEGRV2MetricsTests(unittest.TestCase):
             (checkpoint / "config.json").write_text("{}\n", encoding="utf-8")
             (artifact / "training_completed.txt").write_text(
                 "status=completed\nmethod=eff\ntraining_steps=2\ngroup_size=5\n"
-                "rollout_engine_seed=42\n",
+                "rollout_engine_seed=42\ntrain_batch_size=8\n"
+                "learning_rate=1e-6\nlr_warmup_steps_ratio=0.95\n",
                 encoding="utf-8",
             )
             (artifact / "train.log").write_text(
@@ -140,8 +141,31 @@ class CEGRV2MetricsTests(unittest.TestCase):
             )
 
             self.assertEqual(
-                verify_training_run(root, run_name, "eff", 2, 5, minimum_signal=0.1),
+                verify_training_run(
+                    root,
+                    run_name,
+                    "eff",
+                    2,
+                    5,
+                    minimum_signal=0.1,
+                    train_batch_size=8,
+                    learning_rate=1e-6,
+                    lr_warmup_ratio=0.95,
+                ),
                 [],
+            )
+            self.assertTrue(
+                any(
+                    "warmup" in error
+                    for error in verify_training_run(
+                        root,
+                        run_name,
+                        "eff",
+                        2,
+                        5,
+                        lr_warmup_ratio=0.0,
+                    )
+                )
             )
             (checkpoint / "config.json").unlink()
             self.assertIn(

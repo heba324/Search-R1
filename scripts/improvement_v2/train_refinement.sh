@@ -18,6 +18,7 @@ GROUP_SIZE="${GROUP_SIZE:-5}"
 SEED="${SEED:-42}"
 ROLLOUT_ENGINE_SEED="${ROLLOUT_ENGINE_SEED:-42}"
 LEARNING_RATE="${LEARNING_RATE:-5e-7}"
+LR_WARMUP_STEPS_RATIO="${LR_WARMUP_STEPS_RATIO:-0.0}"
 SAVE_FREQ="${SAVE_FREQ:-20}"
 TEST_FREQ="${TEST_FREQ:-0}"
 VAL_BEFORE_TRAIN="${VAL_BEFORE_TRAIN:-false}"
@@ -76,7 +77,7 @@ python3 -m scripts.improvement_v2.main_ppo_refinement \
   actor_rollout_ref.model.enable_gradient_checkpointing=true \
   actor_rollout_ref.model.use_remove_padding=True \
   actor_rollout_ref.actor.optim.lr="$LEARNING_RATE" \
-  actor_rollout_ref.actor.optim.lr_warmup_steps_ratio=0.0 \
+  actor_rollout_ref.actor.optim.lr_warmup_steps_ratio="$LR_WARMUP_STEPS_RATIO" \
   actor_rollout_ref.actor.use_kl_loss=true \
   actor_rollout_ref.actor.ppo_mini_batch_size="$PPO_MINI_BATCH_SIZE" \
   actor_rollout_ref.actor.ppo_micro_batch_size="$PPO_MICRO_BATCH_SIZE" \
@@ -110,9 +111,10 @@ python3 scripts/improvement_v2/parse_v2_metrics.py \
   --minimum-informative-fallback-rate "$MIN_INFORMATIVE_FALLBACK_RATE" \
   --expected-steps "$TOTAL_STEPS" --expected-group-size "$GROUP_SIZE"
 ELAPSED="$(( $(date +%s) - START_TIME ))"
-printf 'status=completed\nmethod=%s\ninitial_checkpoint=%s\ntraining_steps=%s\ntrain_batch_size=%s\ngroup_size=%s\nseed=%s\nrollout_engine_seed=%s\nelapsed_seconds=%s\n' \
+printf 'status=completed\nmethod=%s\ninitial_checkpoint=%s\ntraining_steps=%s\ntrain_batch_size=%s\ngroup_size=%s\nlearning_rate=%s\nlr_warmup_steps_ratio=%s\nseed=%s\nrollout_engine_seed=%s\nelapsed_seconds=%s\n' \
   "$MODE" "$BASE_MODEL" "$TOTAL_STEPS" "$TRAIN_BATCH_SIZE" "$GROUP_SIZE" \
-  "$SEED" "$ROLLOUT_ENGINE_SEED" "$ELAPSED" > "$MARKER.tmp"
+  "$LEARNING_RATE" "$LR_WARMUP_STEPS_RATIO" "$SEED" \
+  "$ROLLOUT_ENGINE_SEED" "$ELAPSED" > "$MARKER.tmp"
 mv "$MARKER.tmp" "$MARKER"
 if ! python3 scripts/improvement_v2/verify_training_run.py \
   --repo-root "$REPO_ROOT" --run-name "$RUN_NAME" --method "$MODE" \

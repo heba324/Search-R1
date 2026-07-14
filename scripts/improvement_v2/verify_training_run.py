@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 
 from scripts.improvement_v2.parse_v2_metrics import (
@@ -31,6 +32,10 @@ def verify_training_run(
     group_size,
     minimum_signal=0.0,
     rollout_engine_seed=42,
+    initial_model=None,
+    train_batch_size=None,
+    learning_rate=None,
+    lr_warmup_ratio=None,
 ):
     artifact = repo_root / "artifacts/improvement-v2" / run_name
     marker_path = artifact / "training_completed.txt"
@@ -81,6 +86,36 @@ def verify_training_run(
         errors.append(
             f"training marker does not record vLLM engine seed {rollout_engine_seed}"
         )
+    if initial_model is not None:
+        recorded_initial = marker.get("initial_checkpoint")
+        if recorded_initial is None or Path(recorded_initial).resolve() != Path(
+            initial_model
+        ).resolve():
+            errors.append(
+                f"training marker does not use declared initial model {initial_model}"
+            )
+    if train_batch_size is not None and marker.get("train_batch_size") != str(
+        train_batch_size
+    ):
+        errors.append(
+            f"training marker does not record train batch size {train_batch_size}"
+        )
+
+    def verify_float(key, expected, label):
+        if expected is None:
+            return
+        try:
+            recorded = float(marker[key])
+        except (KeyError, TypeError, ValueError):
+            errors.append(f"training marker does not record {label} {expected}")
+            return
+        if not math.isclose(recorded, expected, rel_tol=1e-12, abs_tol=1e-12):
+            errors.append(
+                f"training marker records {label} {recorded}, expected {expected}"
+            )
+
+    verify_float("learning_rate", learning_rate, "learning rate")
+    verify_float("lr_warmup_steps_ratio", lr_warmup_ratio, "warmup ratio")
 
     rows = metrics.get("steps", [])
     if not isinstance(rows, list):
@@ -110,6 +145,10 @@ def main():
     parser.add_argument("--group-size", type=int, default=5)
     parser.add_argument("--minimum-signal", type=float, default=0.0)
     parser.add_argument("--rollout-engine-seed", type=int, default=42)
+    parser.add_argument("--initial-model", type=Path)
+    parser.add_argument("--train-batch-size", type=int)
+    parser.add_argument("--learning-rate", type=float)
+    parser.add_argument("--lr-warmup-ratio", type=float)
     args = parser.parse_args()
     errors = verify_training_run(
         args.repo_root.resolve(),
@@ -119,6 +158,10 @@ def main():
         args.group_size,
         args.minimum_signal,
         args.rollout_engine_seed,
+        args.initial_model,
+        args.train_batch_size,
+        args.learning_rate,
+        args.lr_warmup_ratio,
     )
     if errors:
         raise SystemExit("Training completion verification failed:\n- " + "\n- ".join(errors))

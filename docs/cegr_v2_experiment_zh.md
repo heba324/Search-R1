@@ -8,6 +8,8 @@
 >
 > 硬件目标：单张 A800 80GB，CPU BM25，沿用现有 `Search-R1` 与 `Search-R1-retriever` Conda 环境。
 
+> 时间紧、希望在 2 步冒烟后直接训练单个 EFF120 新模型时，使用独立的[紧急 2+120 路线手册](cegr_v2_direct120_urgent_zh.md)。该路线复用但重新评测已有 baseline；它不替代本文的 Grouped-EM/EFF 双臂因果对照。
+
 ## 1. 先说结论
 
 CEGR V1 是可信的负结果，不是运行失败。固定 700 题上，EM 从 `0.2400` 降到 `0.2071`，差值 `-0.0329`，Bootstrap 95% CI 为 `[-0.0629, -0.0029]`，exact McNemar `p=0.03975`。因此不能把 V1 写成“准确率基本持平”。
