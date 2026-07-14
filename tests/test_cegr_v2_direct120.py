@@ -197,6 +197,10 @@ class CEGRV2Direct120Tests(unittest.TestCase):
         self.assertIn("REQUIRE_DIRECT120_CHECKPOINT", script)
         self.assertIn("DIRECT120_CHECKPOINT", script)
         self.assertIn("direct120-checkpoint.sha256", script)
+        self.assertIn('rm -f "$OUT/direct120-checkpoint.sha256"', script)
+        self.assertIn('cd "$OUT"', script)
+        self.assertIn('sha256sum "$(basename "$ARCHIVE")"', script)
+        self.assertNotIn('sha256sum "$ARCHIVE"', script)
 
     def test_direct_shell_entrypoints_are_executable(self):
         output = subprocess.check_output(

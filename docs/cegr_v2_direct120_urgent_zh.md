@@ -358,9 +358,11 @@ primary_gain_with_guardrail_failure
 cd "$V2_ROOT"
 REQUIRE_DIRECT120_CHECKPOINT=true bash scripts/improvement_v2/collect_evidence.sh
 ls -lh artifacts/improvement-v2/evidence/
-sha256sum -c artifacts/improvement-v2/evidence/search-r1-cegr-v2-evidence.tar.gz.sha256
-tar -tzf artifacts/improvement-v2/evidence/search-r1-cegr-v2-evidence.tar.gz | \
+cd artifacts/improvement-v2/evidence
+sha256sum -c search-r1-cegr-v2-evidence.tar.gz.sha256
+tar -tzf search-r1-cegr-v2-evidence.tar.gz | \
   grep 'search-r1-cegr-v2-eff-direct120-qwen2.5-1.5b-grpo-bm25/actor/global_step_120/config.json'
+cd "$V2_ROOT"
 ```
 
 至少保存：
@@ -380,6 +382,15 @@ W&B 曲线或训练日志
 ```powershell
 scp -P <SSH端口> root@<服务器地址>:/root/autodl-tmp/Search-R1-cegr-v2/artifacts/improvement-v2/evidence/search-r1-cegr-v2-evidence.tar.gz .
 scp -P <SSH端口> root@<服务器地址>:/root/autodl-tmp/Search-R1-cegr-v2/artifacts/improvement-v2/evidence/search-r1-cegr-v2-evidence.tar.gz.sha256 .
+```
+
+下载后在 Windows PowerShell 校验：
+
+```powershell
+$Expected = (Get-Content .\search-r1-cegr-v2-evidence.tar.gz.sha256).Split()[0].ToUpper()
+$Actual = (Get-FileHash .\search-r1-cegr-v2-evidence.tar.gz -Algorithm SHA256).Hash
+if ($Actual -ne $Expected) { throw "SHA-256 校验失败" }
+Write-Host "SHA-256 校验通过: $Actual"
 ```
 
 若平台不开放 `scp`，使用平台文件管理器下载同名两个文件。checkpoint 已装入压缩包，不必再单独逐文件下载模型目录。

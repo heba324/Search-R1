@@ -11,6 +11,8 @@ DIRECT120_CHECKPOINT_REL="verl_checkpoints/$DIRECT120_TRAINING_RUN/actor/global_
 DIRECT120_CHECKPOINT="$REPO_ROOT/$DIRECT120_CHECKPOINT_REL"
 mkdir -p "$OUT"
 rm -f "$ARCHIVE" "$ARCHIVE.sha256"
+rm -f "$OUT/direct120-checkpoint.sha256" \
+  "$OUT/direct120-checkpoint-not-included.txt"
 
 case "$REQUIRE_DIRECT120_CHECKPOINT" in
   true|false) ;;
@@ -44,8 +46,11 @@ TAR_INPUTS=(
   docs/research/cegr_v2_literature_review.md
 )
 if [ -s "$DIRECT120_CHECKPOINT/config.json" ]; then
-  find "$DIRECT120_CHECKPOINT" -type f -print0 | sort -z | xargs -0 sha256sum \
-    > "$OUT/direct120-checkpoint.sha256"
+  (
+    cd "$REPO_ROOT"
+    find "$DIRECT120_CHECKPOINT_REL" -type f -print0 | \
+      sort -z | xargs -0 sha256sum
+  ) > "$OUT/direct120-checkpoint.sha256"
   TAR_INPUTS+=("$DIRECT120_CHECKPOINT_REL")
   echo "Direct120 checkpoint will be included: $DIRECT120_CHECKPOINT_REL"
 else
@@ -53,8 +58,11 @@ else
     > "$OUT/direct120-checkpoint-not-included.txt"
 fi
 
-find "$REPO_ROOT/artifacts/improvement-v2" -path "$OUT" -prune -o \
-  -type f -print0 | sort -z | xargs -0 sha256sum > "$OUT/artifacts.sha256"
+(
+  cd "$REPO_ROOT"
+  find artifacts/improvement-v2 -path artifacts/improvement-v2/evidence \
+    -prune -o -type f -print0 | sort -z | xargs -0 sha256sum
+) > "$OUT/artifacts.sha256"
 
 TMP_ARCHIVE="$(mktemp --suffix=.tar.gz)"
 trap 'rm -f "$TMP_ARCHIVE"' EXIT
@@ -62,5 +70,8 @@ tar --exclude='artifacts/improvement-v2/evidence/search-r1-cegr-v2-evidence.tar.
   -czf "$TMP_ARCHIVE" -C "$REPO_ROOT" "${TAR_INPUTS[@]}"
 mv "$TMP_ARCHIVE" "$ARCHIVE"
 trap - EXIT
-sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"
+(
+  cd "$OUT"
+  sha256sum "$(basename "$ARCHIVE")" > "$(basename "$ARCHIVE").sha256"
+)
 echo "CEGR V2 evidence archive: $ARCHIVE"
