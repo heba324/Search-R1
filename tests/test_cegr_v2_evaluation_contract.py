@@ -6,6 +6,34 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class CEGRV2EvaluationContractTests(unittest.TestCase):
+    def test_decode_compat_casts_integral_float_ids_and_rejects_fractional_ids(self):
+        from scripts.improvement_v2.token_id_compat import (
+            install_integral_token_id_decode,
+        )
+
+        class FakeTokenizer:
+            def decode(self, token_ids, **kwargs):
+                return token_ids
+
+            def batch_decode(self, token_ids, **kwargs):
+                return token_ids
+
+        tokenizer = install_integral_token_id_decode(FakeTokenizer())
+        self.assertEqual(tokenizer.decode([1.0, 2.0]), [1, 2])
+        self.assertEqual(
+            tokenizer.batch_decode([[1.0, 2.0], [3.0, 4.0]]),
+            [[1, 2], [3, 4]],
+        )
+        with self.assertRaisesRegex(TypeError, "Non-integral token ID"):
+            tokenizer.decode([1.5])
+
+    def test_evaluation_entrypoint_installs_token_id_compatibility(self):
+        entrypoint = (
+            REPO_ROOT / "scripts/improvement_v2/main_ppo_refinement.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("install_integral_token_id_decode", entrypoint)
+
     def test_evaluation_writes_only_to_v2_artifacts_and_captures_trajectories(self):
         script = (REPO_ROOT / "scripts/improvement_v2/evaluate_model.sh").read_text(
             encoding="utf-8"

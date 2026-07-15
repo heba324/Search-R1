@@ -42,18 +42,23 @@ def main_task(config):
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
-    if bool(config.trainer.get("val_only", False)):
+    validation_only = bool(config.trainer.get("val_only", False))
+    local_path = copy_local_path_from_hdfs(config.actor_rollout_ref.model.path)
+    tokenizer = hf_tokenizer(local_path)
+    if validation_only:
         import scripts.course_reproduction.behavior_instrumentation as instrumentation
         from scripts.improvement_v2.evaluation_record import (
             build_evaluation_record as build_v2_evaluation_record,
             summarize_search_behavior as summarize_v2_search_behavior,
         )
+        from scripts.improvement_v2.token_id_compat import (
+            install_integral_token_id_decode,
+        )
 
+        install_integral_token_id_decode(tokenizer)
         instrumentation.build_evaluation_record = build_v2_evaluation_record
         instrumentation.summarize_search_behavior = summarize_v2_search_behavior
         instrumentation.install_search_behavior_instrumentation()
-    local_path = copy_local_path_from_hdfs(config.actor_rollout_ref.model.path)
-    tokenizer = hf_tokenizer(local_path)
 
     if config.actor_rollout_ref.actor.strategy == "fsdp":
         assert config.actor_rollout_ref.actor.strategy == config.critic.strategy
