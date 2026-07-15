@@ -6,7 +6,7 @@ from pathlib import Path
 
 class CEGRV2MetricsTests(unittest.TestCase):
     def test_metric_validation_enforces_grouping_and_em_preservation(self):
-        from scripts.improvement_v2.parse_v2_metrics import validate_metrics
+        from scripts.improvement_v2.parse_metrics import validate_metrics
 
         valid = [
             {
@@ -28,7 +28,7 @@ class CEGRV2MetricsTests(unittest.TestCase):
         self.assertEqual(len(errors), 2)
 
     def test_eff_smoke_requires_an_informative_fallback_signal(self):
-        from scripts.improvement_v2.parse_v2_metrics import validate_metrics
+        from scripts.improvement_v2.parse_metrics import validate_metrics
 
         informative = [
             {
@@ -62,7 +62,7 @@ class CEGRV2MetricsTests(unittest.TestCase):
         )
 
     def test_metric_validation_rejects_early_or_nonconsecutive_completion(self):
-        from scripts.improvement_v2.parse_v2_metrics import validate_metrics
+        from scripts.improvement_v2.parse_metrics import validate_metrics
 
         rows = [
             {
@@ -87,7 +87,7 @@ class CEGRV2MetricsTests(unittest.TestCase):
         self.assertTrue(any("not consecutive" in error for error in errors))
 
     def test_training_completion_requires_marker_metrics_and_checkpoint(self):
-        from scripts.improvement_v2.verify_training_run import verify_training_run
+        from scripts.improvement_v2.verify_training import verify_training
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -141,7 +141,7 @@ class CEGRV2MetricsTests(unittest.TestCase):
             )
 
             self.assertEqual(
-                verify_training_run(
+                verify_training(
                     root,
                     run_name,
                     "eff",
@@ -158,7 +158,7 @@ class CEGRV2MetricsTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     "driver seed" in error
-                    for error in verify_training_run(
+                    for error in verify_training(
                         root, run_name, "eff", 2, 5, seed=7
                     )
                 )
@@ -166,7 +166,7 @@ class CEGRV2MetricsTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     "warmup" in error
-                    for error in verify_training_run(
+                    for error in verify_training(
                         root,
                         run_name,
                         "eff",
@@ -179,11 +179,11 @@ class CEGRV2MetricsTests(unittest.TestCase):
             (checkpoint / "config.json").unlink()
             self.assertIn(
                 "checkpoint",
-                verify_training_run(root, run_name, "eff", 2, 5)[0],
+                verify_training(root, run_name, "eff", 2, 5)[0],
             )
 
     def test_training_completion_rechecks_reward_invariants(self):
-        from scripts.improvement_v2.verify_training_run import verify_training_run
+        from scripts.improvement_v2.verify_training import verify_training
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -226,12 +226,12 @@ class CEGRV2MetricsTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            errors = verify_training_run(root, run_name, "eff", 1, 5)
+            errors = verify_training(root, run_name, "eff", 1, 5)
 
             self.assertTrue(any("diverged from EM" in error for error in errors))
 
     def test_training_completion_rejects_nonfinite_logged_metrics(self):
-        from scripts.improvement_v2.parse_v2_metrics import find_nonfinite_tokens
+        from scripts.improvement_v2.parse_metrics import find_nonfinite_tokens
 
         self.assertEqual(find_nonfinite_tokens("actor/loss=0.25 reward=1.0"), [])
         self.assertEqual(find_nonfinite_tokens("actor/loss=nan"), ["nan"])

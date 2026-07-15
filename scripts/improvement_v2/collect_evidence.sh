@@ -3,24 +3,24 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-eval "$(python3 "$SCRIPT_DIR/direct120_contract.py" --shell)"
+eval "$(python3 "$SCRIPT_DIR/config.py" --shell)"
 OUT="$REPO_ROOT/artifacts/improvement-v2/evidence"
 ARCHIVE="$OUT/search-r1-cegr-v2-evidence.tar.gz"
-REQUIRE_DIRECT120_CHECKPOINT="${REQUIRE_DIRECT120_CHECKPOINT:-false}"
-DIRECT120_CHECKPOINT_REL="verl_checkpoints/$DIRECT120_TRAINING_RUN/actor/global_step_$DIRECT120_TRAINING_STEPS"
-DIRECT120_CHECKPOINT="$REPO_ROOT/$DIRECT120_CHECKPOINT_REL"
+REQUIRE_FINAL_CHECKPOINT="${REQUIRE_FINAL_CHECKPOINT:-false}"
+FINAL_CHECKPOINT_REL="verl_checkpoints/$CEGR_V2_TRAINING_RUN/actor/global_step_$CEGR_V2_TRAINING_STEPS"
+FINAL_CHECKPOINT="$REPO_ROOT/$FINAL_CHECKPOINT_REL"
 mkdir -p "$OUT"
 rm -f "$ARCHIVE" "$ARCHIVE.sha256"
-rm -f "$OUT/direct120-checkpoint.sha256" \
-  "$OUT/direct120-checkpoint-not-included.txt"
+rm -f "$OUT/final-checkpoint.sha256" \
+  "$OUT/final-checkpoint-not-included.txt"
 
-case "$REQUIRE_DIRECT120_CHECKPOINT" in
+case "$REQUIRE_FINAL_CHECKPOINT" in
   true|false) ;;
-  *) echo "REQUIRE_DIRECT120_CHECKPOINT must be true or false" >&2; exit 1 ;;
+  *) echo "REQUIRE_FINAL_CHECKPOINT must be true or false" >&2; exit 1 ;;
 esac
-if [ "$REQUIRE_DIRECT120_CHECKPOINT" = true ] && \
-   [ ! -s "$DIRECT120_CHECKPOINT/config.json" ]; then
-  echo "Missing required Direct120 checkpoint: $DIRECT120_CHECKPOINT" >&2
+if [ "$REQUIRE_FINAL_CHECKPOINT" = true ] && \
+   [ ! -s "$FINAL_CHECKPOINT/config.json" ]; then
+  echo "Missing required CEGR V2 checkpoint: $FINAL_CHECKPOINT" >&2
   exit 1
 fi
 
@@ -41,21 +41,22 @@ python3 -m pip freeze > "$OUT/search-env-pip-freeze.txt"
 TAR_INPUTS=(
   artifacts/improvement-v2
   data/improvement_v2/pilot_manifest.json
+  scripts/improvement_v2
   docs/cegr_v2_experiment_zh.md
-  docs/cegr_v2_direct120_urgent_zh.md
   docs/research/cegr_v2_literature_review.md
+  docs/research/cegr_v2_results_zh.md
 )
-if [ -s "$DIRECT120_CHECKPOINT/config.json" ]; then
+if [ -s "$FINAL_CHECKPOINT/config.json" ]; then
   (
     cd "$REPO_ROOT"
-    find "$DIRECT120_CHECKPOINT_REL" -type f -print0 | \
+    find "$FINAL_CHECKPOINT_REL" -type f -print0 | \
       sort -z | xargs -0 sha256sum
-  ) > "$OUT/direct120-checkpoint.sha256"
-  TAR_INPUTS+=("$DIRECT120_CHECKPOINT_REL")
-  echo "Direct120 checkpoint will be included: $DIRECT120_CHECKPOINT_REL"
+  ) > "$OUT/final-checkpoint.sha256"
+  TAR_INPUTS+=("$FINAL_CHECKPOINT_REL")
+  echo "CEGR V2 checkpoint will be included: $FINAL_CHECKPOINT_REL"
 else
-  printf 'Direct120 checkpoint was not present; standard V2 evidence only.\n' \
-    > "$OUT/direct120-checkpoint-not-included.txt"
+  printf 'CEGR V2 checkpoint was not present; evidence excludes model weights.\n' \
+    > "$OUT/final-checkpoint-not-included.txt"
 fi
 
 (

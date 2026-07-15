@@ -34,7 +34,7 @@ class CEGRV2GroupingTests(unittest.TestCase):
             )
 
     def test_batch_scoring_is_group_correct_after_arbitrary_reordering(self):
-        from scripts.improvement_v2.cegr_v2_reward import score_batch_by_uid
+        from scripts.improvement_v2.reward import score_batch_by_uid
 
         uids = ["nq:train:7", "hotpotqa:train:3", "nq:train:7", "hotpotqa:train:3"]
         trajectories = [

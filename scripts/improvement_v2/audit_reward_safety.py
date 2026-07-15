@@ -7,7 +7,7 @@ import argparse
 import json
 from pathlib import Path
 
-from scripts.improvement_v2.cegr_v2_reward import score_group
+from scripts.improvement_v2.reward import score_group
 
 
 def audit_groups(groups, expected_group_size=5):

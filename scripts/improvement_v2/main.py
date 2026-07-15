@@ -7,7 +7,7 @@ import numpy as np
 import ray
 import torch
 
-from scripts.improvement_v2.cegr_v2_manager import CEGRV2RewardManager
+from scripts.improvement_v2.manager import CEGRV2RewardManager
 from verl.trainer.main_ppo import RewardManager
 
 
@@ -62,7 +62,7 @@ def main_task(config):
 
     if config.actor_rollout_ref.actor.strategy == "fsdp":
         assert config.actor_rollout_ref.actor.strategy == config.critic.strategy
-        from scripts.improvement_v2.seeded_worker import install_seeded_rollout_patch
+        from scripts.improvement_v2.worker import install_seeded_rollout_patch
         from verl.workers.fsdp_workers import ActorRolloutRefWorker, CriticWorker
         from verl.single_controller.ray import RayWorkerGroup
 

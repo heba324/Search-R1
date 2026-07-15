@@ -8,7 +8,7 @@ import json
 import math
 from pathlib import Path
 
-from scripts.improvement_v2.parse_v2_metrics import (
+from scripts.improvement_v2.parse_metrics import (
     find_nonfinite_tokens,
     summarize_signal,
     validate_metrics,
@@ -24,7 +24,7 @@ def _read_marker(path):
     return values
 
 
-def verify_training_run(
+def verify_training(
     repo_root,
     run_name,
     method,
@@ -154,7 +154,7 @@ def main():
     parser.add_argument("--learning-rate", type=float)
     parser.add_argument("--lr-warmup-ratio", type=float)
     args = parser.parse_args()
-    errors = verify_training_run(
+    errors = verify_training(
         args.repo_root.resolve(),
         args.run_name,
         args.method,

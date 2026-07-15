@@ -29,7 +29,7 @@ class CEGRV2EvaluationContractTests(unittest.TestCase):
 
     def test_evaluation_entrypoint_installs_token_id_compatibility(self):
         entrypoint = (
-            REPO_ROOT / "scripts/improvement_v2/main_ppo_refinement.py"
+            REPO_ROOT / "scripts/improvement_v2/main.py"
         ).read_text(encoding="utf-8")
 
         self.assertIn("install_integral_token_id_decode", entrypoint)
@@ -41,45 +41,28 @@ class CEGRV2EvaluationContractTests(unittest.TestCase):
 
         self.assertIn("artifacts/improvement-v2/evaluation", script)
         self.assertIn("SEARCH_R1_EVAL_TRAJECTORIES", script)
-        self.assertIn("scripts.improvement_v2.main_ppo_refinement", script)
+        self.assertIn("scripts.improvement_v2.main", script)
         self.assertIn('+reward_strategy.seed="$SEED"', script)
         self.assertIn('+actor_rollout_ref.rollout.engine_seed="$ROLLOUT_ENGINE_SEED"', script)
         self.assertIn("Already completed; preserving evaluation", script)
         self.assertIn("Refusing to overwrite a partial evaluation", script)
         self.assertNotIn("artifacts/course-reproduction/evaluation", script)
 
-    def test_pilot_evaluates_three_models_and_applies_fail_closed_gate(self):
-        script = (REPO_ROOT / "scripts/improvement_v2/evaluate_pilot.sh").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertIn("baseline", script)
-        self.assertIn("em-control", script)
-        self.assertIn("cegr-v2", script)
-        self.assertIn("EVAL_BATCH_SIZE=20", script)
-        self.assertIn("scripts.improvement_v2.verify_training_run", script)
-        self.assertIn("scripts.improvement_v2.pilot_gate", script)
-        self.assertIn("scripts.improvement_v2.verify_pilot_gate", script)
-
-    def test_final_evaluation_uses_all_700_examples_and_both_comparators(self):
-        script = (REPO_ROOT / "scripts/improvement_v2/evaluate_final.sh").read_text(
+    def test_final_evaluation_uses_all_700_examples(self):
+        script = (REPO_ROOT / "scripts/improvement_v2/run_evaluation.sh").read_text(
             encoding="utf-8"
         )
 
         self.assertIn("data/course_eval/test.parquet", script)
-        self.assertIn("EVAL_BATCH_SIZE=28", script)
+        self.assertIn('EVAL_BATCH_SIZE="$CEGR_V2_EVAL_BATCH_SIZE"', script)
         self.assertIn("baseline", script)
-        self.assertIn("em-control", script)
         self.assertIn("cegr-v2", script)
-        self.assertIn("scripts.improvement_v2.final_analysis", script)
+        self.assertIn("scripts.improvement_v2.analysis", script)
         self.assertIn("artifacts/improvement/paired-evaluation/baseline.jsonl", script)
         self.assertIn('evaluate_one baseline "$BASELINE_MODEL"', script)
         self.assertIn("historical-baseline-rescored.jsonl", script)
         self.assertIn("scripts.improvement_v2.verify_pilot_data", script)
-        self.assertIn("scripts.improvement_v2.verify_pilot_gate", script)
-        self.assertNotIn('python3 "$SCRIPT_DIR/pilot_gate.py"', script)
-        self.assertIn('--pilot-gate "$PILOT_GATE"', script)
-        self.assertIn("scripts.improvement_v2.rescore_frozen_baseline", script)
+        self.assertIn("scripts.improvement_v2.rescore_baseline", script)
 
     def test_v2_evaluation_record_uses_strict_answer_tags(self):
         from scripts.improvement_v2.evaluation_record import build_evaluation_record
@@ -118,7 +101,7 @@ class CEGRV2EvaluationContractTests(unittest.TestCase):
         self.assertEqual(record["evidence_coverage"], 0.0)
 
     def test_frozen_baseline_is_rescored_without_changing_identity_or_trajectory(self):
-        from scripts.improvement_v2.rescore_frozen_baseline import rescore_records
+        from scripts.improvement_v2.rescore_baseline import rescore_records
 
         original = [
             {
@@ -142,7 +125,7 @@ class CEGRV2EvaluationContractTests(unittest.TestCase):
         self.assertFalse(report["regenerated"])
 
     def test_record_em_must_match_official_evaluation_metrics(self):
-        from scripts.improvement_v2.verify_evaluation_records import verify_records
+        from scripts.improvement_v2.verify_evaluation import verify_records
 
         marker = {"metrics": {"nq": 0.5, "hotpotqa": 1.0}}
         records = [

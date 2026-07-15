@@ -1,6 +1,6 @@
 """Fail fast when the V2 actor wrapper is unsafe for verl Ray colocation."""
 
-from scripts.improvement_v2.seeded_worker import install_seeded_rollout_patch
+from scripts.improvement_v2.worker import install_seeded_rollout_patch
 from verl.single_controller.base import Worker
 from verl.workers.fsdp_workers import ActorRolloutRefWorker
 

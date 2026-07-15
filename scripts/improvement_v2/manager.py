@@ -9,7 +9,7 @@ from statistics import mean
 import numpy as np
 import torch
 
-from scripts.improvement_v2.cegr_v2_reward import score_batch_by_uid
+from scripts.improvement_v2.reward import score_batch_by_uid
 from scripts.improvement_v2.grouping import build_group_uids
 from verl import DataProto
 

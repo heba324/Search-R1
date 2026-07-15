@@ -5,7 +5,7 @@ from pathlib import Path
 
 class CEGRV2RewardTests(unittest.TestCase):
     def test_mixed_group_reward_is_exactly_the_official_em_vector(self):
-        from scripts.improvement_v2.cegr_v2_reward import score_group
+        from scripts.improvement_v2.reward import score_group
 
         trajectories = [
             "<answer>McComb, Mississippi</answer>",
@@ -23,7 +23,7 @@ class CEGRV2RewardTests(unittest.TestCase):
         self.assertFalse(any(item.fallback_used for item in scored))
 
     def test_all_zero_em_group_uses_f1_only_to_restore_relative_order(self):
-        from scripts.improvement_v2.cegr_v2_reward import score_group
+        from scripts.improvement_v2.reward import score_group
 
         trajectories = [
             "<answer>McComb</answer>",
@@ -40,7 +40,7 @@ class CEGRV2RewardTests(unittest.TestCase):
         self.assertTrue(all(item.fallback_used for item in scored))
 
     def test_answer_parser_matches_case_sensitive_environment_tags(self):
-        from scripts.improvement_v2.cegr_v2_reward import score_group
+        from scripts.improvement_v2.reward import score_group
 
         uppercase = score_group(
             ["<ANSWER>McComb, Mississippi</ANSWER>"], ["McComb, Mississippi"]
@@ -53,7 +53,7 @@ class CEGRV2RewardTests(unittest.TestCase):
         self.assertEqual(lowercase.exact_match, 1.0)
 
     def test_answer_score_matches_official_full_sequence_reward(self):
-        from scripts.improvement_v2.cegr_v2_reward import score_group
+        from scripts.improvement_v2.reward import score_group
 
         source = Path(__file__).resolve().parents[1] / "verl/utils/reward_score/qa_em.py"
         spec = importlib.util.spec_from_file_location("official_qa_em", source)
@@ -75,7 +75,7 @@ class CEGRV2RewardTests(unittest.TestCase):
                 self.assertEqual(v2_score, official_score)
 
     def test_search_count_and_response_length_do_not_change_answer_reward(self):
-        from scripts.improvement_v2.cegr_v2_reward import score_group
+        from scripts.improvement_v2.reward import score_group
 
         long_multihop = (
             "<think>First identify the singer.</think>"

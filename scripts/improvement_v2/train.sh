@@ -6,20 +6,19 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$REPO_ROOT"
 
 SEARCH_ENV="${SEARCH_ENV:-Search-R1}"
-MODE="${MODE:-eff}"
-BASELINE_RUN_NAME="${BASELINE_RUN_NAME:-search-r1-course-qwen2.5-1.5b-grpo-bm25}"
-BASE_MODEL="${BASE_MODEL:-$REPO_ROOT/verl_checkpoints/$BASELINE_RUN_NAME/actor/global_step_120}"
-TOTAL_STEPS="${TOTAL_STEPS:-40}"
-TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-32}"
+MODE="${MODE:?MODE is required}"
+BASE_MODEL="${BASE_MODEL:?BASE_MODEL is required}"
+TOTAL_STEPS="${TOTAL_STEPS:?TOTAL_STEPS is required}"
+TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:?TRAIN_BATCH_SIZE is required}"
 VAL_BATCH_SIZE="${VAL_BATCH_SIZE:-20}"
-PPO_MINI_BATCH_SIZE="${PPO_MINI_BATCH_SIZE:-32}"
+PPO_MINI_BATCH_SIZE="${PPO_MINI_BATCH_SIZE:?PPO_MINI_BATCH_SIZE is required}"
 PPO_MICRO_BATCH_SIZE="${PPO_MICRO_BATCH_SIZE:-1}"
-GROUP_SIZE="${GROUP_SIZE:-5}"
-SEED="${SEED:-42}"
-ROLLOUT_ENGINE_SEED="${ROLLOUT_ENGINE_SEED:-42}"
-LEARNING_RATE="${LEARNING_RATE:-5e-7}"
-LR_WARMUP_STEPS_RATIO="${LR_WARMUP_STEPS_RATIO:-0.0}"
-SAVE_FREQ="${SAVE_FREQ:-20}"
+GROUP_SIZE="${GROUP_SIZE:?GROUP_SIZE is required}"
+SEED="${SEED:?SEED is required}"
+ROLLOUT_ENGINE_SEED="${ROLLOUT_ENGINE_SEED:?ROLLOUT_ENGINE_SEED is required}"
+LEARNING_RATE="${LEARNING_RATE:?LEARNING_RATE is required}"
+LR_WARMUP_STEPS_RATIO="${LR_WARMUP_STEPS_RATIO:?LR_WARMUP_STEPS_RATIO is required}"
+SAVE_FREQ="${SAVE_FREQ:?SAVE_FREQ is required}"
 TEST_FREQ="${TEST_FREQ:-0}"
 VAL_BEFORE_TRAIN="${VAL_BEFORE_TRAIN:-false}"
 VAL_DATA="${VAL_DATA:-$REPO_ROOT/data/improvement_v2/pilot.parquet}"
@@ -27,20 +26,12 @@ VAL_DATA_NUM="${VAL_DATA_NUM:-null}"
 MIN_INFORMATIVE_FALLBACK_RATE="${MIN_INFORMATIVE_FALLBACK_RATE:-0.0}"
 ENGINE_STOP_STEP="$(( TOTAL_STEPS + 1 ))"
 
-case "$MODE" in
-  eff)
-    DEFAULT_RUN_NAME="search-r1-cegr-v2-qwen2.5-1.5b-grpo-bm25"
-    ;;
-  grouped_em)
-    DEFAULT_RUN_NAME="search-r1-cegr-v2-em-control-qwen2.5-1.5b-grpo-bm25"
-    ;;
-  *)
-    echo "MODE must be eff or grouped_em, found: $MODE" >&2
-    exit 1
-    ;;
-esac
+if [ "$MODE" != eff ]; then
+  echo "The final CEGR V2 workflow requires MODE=eff, found: $MODE" >&2
+  exit 1
+fi
 
-RUN_NAME="${RUN_NAME:-$DEFAULT_RUN_NAME}"
+RUN_NAME="${RUN_NAME:?RUN_NAME is required}"
 ARTIFACT_DIR="$REPO_ROOT/artifacts/improvement-v2/$RUN_NAME"
 CHECKPOINT_DIR="$REPO_ROOT/verl_checkpoints/$RUN_NAME"
 LOG_FILE="$ARTIFACT_DIR/train.log"
@@ -49,7 +40,7 @@ MARKER="$ARTIFACT_DIR/training_completed.txt"
 (( TRAIN_BATCH_SIZE > 0 && TOTAL_STEPS > 0 && GROUP_SIZE > 1 )) || { echo "Invalid training dimensions." >&2; exit 1; }
 (( (TRAIN_BATCH_SIZE * GROUP_SIZE) % PPO_MINI_BATCH_SIZE == 0 )) || { echo "Expanded batch must be divisible by PPO mini batch." >&2; exit 1; }
 (( PPO_MINI_BATCH_SIZE % PPO_MICRO_BATCH_SIZE == 0 )) || { echo "PPO mini batch must be divisible by micro batch." >&2; exit 1; }
-[ -s "$BASE_MODEL/config.json" ] || { echo "Missing frozen baseline checkpoint: $BASE_MODEL" >&2; exit 1; }
+[ -s "$BASE_MODEL/config.json" ] || { echo "Missing base model: $BASE_MODEL" >&2; exit 1; }
 [ -s "$VAL_DATA" ] || { echo "Missing validation data: $VAL_DATA" >&2; exit 1; }
 [ ! -e "$CHECKPOINT_DIR" ] || { echo "Refusing to overwrite V2 checkpoint directory: $CHECKPOINT_DIR" >&2; exit 1; }
 [ ! -e "$ARTIFACT_DIR" ] || { echo "Refusing to overwrite V2 artifact directory: $ARTIFACT_DIR" >&2; exit 1; }
@@ -67,7 +58,7 @@ export PYTHONUNBUFFERED=1
 export PYTHONHASHSEED="$SEED"
 START_TIME="$(date +%s)"
 
-python3 -m scripts.improvement_v2.main_ppo_refinement \
+python3 -m scripts.improvement_v2.main \
   data.train_files="$REPO_ROOT/data/nq_hotpotqa_train/train.parquet" \
   data.val_files="$VAL_DATA" data.train_data_num=null data.val_data_num="$VAL_DATA_NUM" \
   data.train_batch_size="$TRAIN_BATCH_SIZE" data.val_batch_size="$VAL_BATCH_SIZE" \
@@ -106,7 +97,7 @@ python3 -m scripts.improvement_v2.main_ppo_refinement \
   max_turns=4 retriever.url="http://127.0.0.1:8000/retrieve" retriever.topk=3 \
   2>&1 | tee "$LOG_FILE"
 
-python3 -m scripts.improvement_v2.parse_v2_metrics \
+python3 -m scripts.improvement_v2.parse_metrics \
   "$LOG_FILE" "$ARTIFACT_DIR/reward_metrics.json" \
   --minimum-informative-fallback-rate "$MIN_INFORMATIVE_FALLBACK_RATE" \
   --expected-steps "$TOTAL_STEPS" --expected-group-size "$GROUP_SIZE"
@@ -116,7 +107,7 @@ printf 'status=completed\nmethod=%s\ninitial_checkpoint=%s\ntraining_steps=%s\nt
   "$LEARNING_RATE" "$LR_WARMUP_STEPS_RATIO" "$SEED" \
   "$ROLLOUT_ENGINE_SEED" "$ELAPSED" > "$MARKER.tmp"
 mv "$MARKER.tmp" "$MARKER"
-if ! python3 -m scripts.improvement_v2.verify_training_run \
+if ! python3 -m scripts.improvement_v2.verify_training \
   --repo-root "$REPO_ROOT" --run-name "$RUN_NAME" --method "$MODE" \
   --steps "$TOTAL_STEPS" --group-size "$GROUP_SIZE" \
   --minimum-signal "$MIN_INFORMATIVE_FALLBACK_RATE" \
@@ -124,4 +115,4 @@ if ! python3 -m scripts.improvement_v2.verify_training_run \
   rm -f "$MARKER"
   exit 1
 fi
-echo "CEGR V2 refinement completed: $MARKER"
+echo "CEGR V2 training completed: $MARKER"

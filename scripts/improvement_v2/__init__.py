@@ -1,1 +1,1 @@
-"""CEGR V2 accuracy-first refinement experiment."""
+"""CEGR V2 grouped EFF training and evaluation workflow."""

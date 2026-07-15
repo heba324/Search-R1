@@ -1,450 +1,423 @@
-# Search-R1 CEGR V2 改进实验与云端运行手册
+# CEGR V2 实验操作手册
 
-> 状态：CEGR V1 已冻结；CEGR V2 代码与离线门禁已完成；GPU 训练结果尚未产生。
+> 最终采用的实验路径：CEGR V1 和课程 baseline 已完成；V2 先运行 2 步冒烟，再从原始 Qwen2.5-1.5B-Instruct 训练 120 步并完成固定 700 题评测。
 >
 > 分支：`codex/search-r1-cegr-v2`
 >
-> V1 基准提交：`8672aad0f4089f0fca388601cd9ce20fc9b8b776`
->
-> 硬件目标：单张 A800 80GB，CPU BM25，沿用现有 `Search-R1` 与 `Search-R1-retriever` Conda 环境。
+> V1 冻结提交：`8672aad0f4089f0fca388601cd9ce20fc9b8b776`
 
-> 时间紧、希望在 2 步冒烟后直接训练单个 EFF120 新模型时，使用独立的[紧急 2+120 路线手册](cegr_v2_direct120_urgent_zh.md)。该路线复用但重新评测已有 baseline；它不替代本文的 Grouped-EM/EFF 双臂因果对照。
+## 1. 先读结论
 
-## 1. 先说结论
+可以在 2 步冒烟通过后直接做 120 步，但要遵守以下边界：
 
-CEGR V1 是可信的负结果，不是运行失败。固定 700 题上，EM 从 `0.2400` 降到 `0.2071`，差值 `-0.0329`，Bootstrap 95% CI 为 `[-0.0629, -0.0029]`，exact McNemar `p=0.03975`。因此不能把 V1 写成“准确率基本持平”。
+1. **baseline 不重新训练**。已有 baseline `global_step_120` 是完整训练产物，重训既花钱，也会因随机性产生另一条 baseline。
+2. **baseline 必须重新评测**。旧 checkpoint 要与新 EFF120 checkpoint 使用同一份 700 题、同一检索器、同一 parser、同一 seed 和同一评测脚本重新生成轨迹。
+3. 2 步只检查能否训练，不接着训练。正式 120 步会重新从原始 `Qwen2.5-1.5B-Instruct` 起跑，保证 baseline 和 EFF120 都各自接受 120 次参数更新。
+4. 单臂不是算法要求。本实验复用已有 baseline，从而避免重复训练一个 120 步模型。
+5. 这条路线比较的是“旧 Search-R1 baseline”与“分组修复 + EFF”的整体差异，**不能单独归因**为 F1 fallback 的效果。
 
-GPT 给出的“保留 V1、在新分支做 V2、删除普通搜索与长度偏好、先小测再正式评测”方向是对的，但它漏掉了一个更关键的代码事实：当前 trainer 先生成同题 5 条 rollout，随后却给每一条分配独立 `uid`。GRPO 按 `uid` 分组，结果每组只有一条，advantage 近似原始 reward，而不是真正的同题组内标准化。
+若必须严格回答“变化来自分组修复还是 F1 fallback”，仍需另行预注册并训练一个从原始 Qwen 起跑的 `Grouped-EM-120` 对照。本次已完成结果只估计“分组修复 + EFF”的组合效应。
 
-这会让 V1 中 F1 或 `answer_in_context` 部分命中的错误答案直接得到正 advantage。继续把权重改成 `0.65 EM + 0.25 F1 + 0.10 evidence` 并不能解决这个问题。V2 因此不采用那组直加权，而是先恢复同题共享 `uid`，再比较两个等预算候选：
+## 2. 实验契约
 
-1. `Grouped-EM`：修复 grouping 后继续使用纯 EM。
-2. `EFF`：EM-First, F1-Fallback。只在同题 5 条 rollout 全部 EM 为 0 时使用 token-F1 排序。
+| 项目 | 已有 baseline | 新 EFF120 |
+|---|---:|---:|
+| 起始模型 | Qwen2.5-1.5B-Instruct | Qwen2.5-1.5B-Instruct |
+| 训练更新数 | 120 | 120 |
+| 训练 batch | 32 | 32 |
+| group size | 5 | 5 |
+| 学习率 | `1e-6` | `1e-6` |
+| warmup ratio | `0.95` | `0.95` |
+| 检索 | CPU BM25, Top-3 | CPU BM25, Top-3 |
+| 最大搜索轮次 | 4 | 4 |
+| 奖励/分组 | 原课程 baseline | 修复分组后的 EFF |
+| 正式评测 | 重新评测固定 700 题 | 重新评测同一固定 700 题 |
 
-两者都从同一个冻结 baseline `global_step_120` 追加 40 步。先用与最终 700 题完全不重叠的 140 题 pilot 选择候选，再一次性进入最终评测。
+本路线省掉了第二个新训练臂和训练中的周期性 700 题验证，因此是“关键训练预算匹配”，不是全流程计算量完全相同的随机对照试验。分析文件会自动记录这个限制。
 
-## 2. 对 GPT 原判断的辨别
+## 3. 租机与资源
 
-| 原判断 | 结论 | 原因 |
-|---|---|---|
-| V1 必须永久保留，V2 独立分支、目录和 run name | 正确 | 防止负结果与 checkpoint 被覆盖，也保证报告可审计 |
-| V1 的 EM/F1 显著下降 | 正确 | 700 条配对结果、Bootstrap 与 McNemar 均支持 |
-| V1 因“普通搜索惩罚和长度惩罚过强”而下降 | 证据不足 | V1 没有直接长度惩罚；1 至 3 次正常有效搜索也不扣分，惩罚主要针对非法、重复和第 4 次有效搜索 |
-| 删除搜索成本项是低风险方向 | 基本正确 | 它能减少变量并避免把效率代理重新放进训练目标，但不能单独保证 EM 上升 |
-| 使用固定 `EM + F1 + evidence - penalty` 新权重 | 不采用 | singleton `uid` 下错误轨迹仍会得到直接正 advantage；同类中间检索奖励的经验研究也显示高权重可能伤害结果 |
-| 只要静态上“正确分数高于错误”就能保证训练有效 | 错误 | 静态排序不等于组内 advantage、后续 policy 分布或最终 EM 保证 |
-| 先小规模测试再投入完整预算 | 正确 | V2 将它落实为离线性质测试、2 步信号 smoke、独立 140 题候选选择和最终 700 题四层门禁 |
-
-所以，本次不是把 CEGR 改回原始 baseline。V2 仍然包含新的组级稠密反馈，但先修复了它赖以成立的 GRPO 分组前提，并保留一个纯 EM 候选作为风险较低的退路。
-
-## 3. 文献调研得到的设计约束
-
-完整综述见 [`docs/research/cegr_v2_literature_review.md`](research/cegr_v2_literature_review.md)。这里仅列与决策直接相关的结论。
-
-### 3.1 Search-R1 与 GRPO
-
-Search-R1 使用最终答案 EM 作为结果奖励，并让模型在推理过程中自主调用检索。GRPO 的组相对信号要求同一 prompt 的多条输出属于同一组。DeepSeekMath 与 DAPO 也都把“同题多输出形成可比较组”作为核心前提；全 0 或全 1 组没有有效相对梯度。
-
-本仓库当前 singleton `uid` 路径破坏了这个前提。因此，恢复共享 prompt identity 是 V2 的第一优先级，而不是再增加一个奖励项。
-
-### 3.2 F1 部分信用
-
-R1-Searcher 与 ReSearch 表明，token-F1 可以缓解二元 EM 的稀疏性。但 F1 也可能鼓励词面重叠或更长答案。LeTS 进一步报告，小模型在仅使用结果奖励时可能发生搜索策略坍缩。由此得到两个约束：
-
-1. F1 不能在已有 exact winner 的组内改变 EM 的胜负关系。
-2. 响应长度、搜索次数和单跳退化必须作为评测护栏，而不是再次混入 reward。
-
-### 3.3 中间检索奖励
-
-Search-R1 后续经验研究发现，“gold answer 是否出现在检索文本中”的中间奖励收益有限，权重增大时性能会下降。V1 的 `evidence_answer_coverage` 与它高度相似，而且它只能证明答案字符串出现，不能证明 supporting fact、来源或推理链正确。
-
-因此 V2 删除训练期 evidence reward。`evidence_coverage` 仍保留为诊断指标，不再充当模型优化目标。
-
-### 3.4 暂不采用的方法
-
-Potential-based reward shaping、TIPS 式 turn-level potential、约束强化学习和词典序多目标优化都有研究价值，但需要额外 teacher forward、状态势函数或优化器。它们会在当前 1.5B、单卡、课程预算中引入过多变量，保留为 V3 备选，不与本次 grouping 修复混在一起。
-
-## 4. V2 的精确定义
-
-对问题 `q` 的 5 条 rollout，定义：
+推荐沿用已经选定的实例：
 
 ```text
-e_i = official_exact_match(final_answer_i, gold_q)  in {0, 1}
-f_i = token_f1(final_answer_i, gold_q)               in [0, 1]
+1 x A800 80GB
+RAM 实际可用至少 110 GiB
+/root/autodl-tmp 实际可用至少 420 GiB
+数据盘标称约 505 GB
+Ubuntu 22.04 + CUDA 12.1 开发镜像
 ```
 
-两个候选的 reward 是：
+如果页面仍显示 5.98 元/小时，以创建实例时的实时价格为准。单卡训练时间不能在实测前保证；总费用按下面计算：
 
 ```text
-Grouped-EM:
-C_i = e_i
-
-EFF:
-if sum(e_j for j in group_q) == 0:
-    E_i = f_i
-else:
-    E_i = e_i
+总费用 = 实例实际运行秒数 / 3600 x 实时单价
 ```
 
-随后仍由现有 GRPO 实现计算：
+正式费用包含 2 步冒烟、120 步训练、baseline 700 题复评、EFF120 700 题评测和证据整理。单臂只省掉一个额外 120 步训练，不能省掉公平评测。
 
-```text
-A_i = (R_i - mean(R_group)) / (std(R_group) + 1e-6)
-```
+## 4. 开机后先检查硬件
 
-### 4.1 可以严格保证的性质
-
-1. 同一问题的 5 条 rollout 使用同一 `uid`。
-2. 任一组只要存在 exact winner，EFF 与 Grouped-EM 的 reward vector 逐元素完全相同。
-3. 全错组中，Grouped-EM advantage 全 0；EFF 只有在 F1 存在差异时才产生正负相对信号。
-4. 错误大写标签、缺失 `<answer>` 标签与正式 parser 一样得到 0。
-5. 正常搜索次数、响应长度、evidence 字符串和重复搜索不会直接改变 V2 reward。
-
-### 4.2 不能保证的事情
-
-上述性质不能保证最终 EM 必然上涨。全错组中的 F1 更新会改变模型参数和后续 rollout 分布；CUDA、采样与小模型能力也带来方差。任何人在真实训练前承诺具体涨点都不科学。
-
-本项目能保证的是：失败会尽早、明确、低成本地暴露；最终只有通过独立数据门禁的方法才会被写成有效改进。
-
-## 5. 实验矩阵与归因边界
-
-| 名称 | 起点 | 追加步数 | grouping | reward | 作用 |
-|---|---|---:|---|---|---|
-| Frozen baseline | baseline step 120 | 0 | 历史 singleton 路径 | EM | 已完成基线 |
-| Grouped-EM | 同一 baseline step 120 | 40 | 同题共享 `uid` | 纯 EM | 候选 A，同时是 EFF 的等预算对照 |
-| EFF | 同一 baseline step 120 | 40 | 同题共享 `uid` | 全错组 F1，否则 EM | 候选 B |
-
-两条新训练臂固定：Qwen2.5-1.5B-Instruct、NQ+HotpotQA、batch 32、group size 5、BM25 Top-3、最多 4 轮搜索、driver seed 42、vLLM engine seed 42、学习率 `5e-7`、40 步。V2 专用 worker 将 engine seed 传给 vLLM 构造器；它不把 seed 塞进每条请求的 `SamplingParams`，因此不会让同题 5 条 rollout 因共享请求 seed 而失去采样多样性。
-
-`EFF - Grouped-EM` 可以用于判断 F1 fallback 的额外贡献。`Grouped-EM - Frozen baseline` 同时包含 grouping 修复和额外 40 步训练，不能进一步声称差值完全由 grouping 单独造成。报告中应称它为“group-corrected refinement 复合候选”。
-
-## 6. 四层门禁
-
-### Phase 0：离线性质测试
-
-必须通过：
-
-```text
-同题 rollout 数量恰好为 5
-混合正确组中 EFF reward == EM reward
-严格标签 parser 与官方 scorer 一致
-V1 完整 checkpoint、代码和结果 SHA-256 未改变
-search_r1/ 与 verl/ 相对 V1 提交零差异
-```
-
-### Phase 1：2 步机制 smoke
-
-smoke 只使用 disjoint pilot 数据，不读取最终 700 题。除了无 OOM、NaN、保存失败外，还要求：
-
-```text
-group_size > 1
-所有混合正确组 reward 与 EM 无不一致
-全错组中至少 10% 存在可排序的 F1 差异
-```
-
-完成门禁还会复核完整 `train.log` 中不存在独立 token 形式的 `NaN/Inf`、训练指标 step 连续、最终 checkpoint 存在且非空，并核对 completion marker 中的方法、group size 与 vLLM engine seed。它能排除日志中可见的非有限训练失败，但不能把“没有记录到 NaN”夸大成所有底层 CUDA 梯度都得到形式化证明。
-
-最后一项不满足时，说明 EFF 在真实 rollout 上几乎没有额外信号，应停止，不启动两条 40 步训练。
-
-### Phase 2：140 题盲 pilot 选择
-
-pilot 为七个数据集各 20 题，并与最终七个数据集各 100 题的索引完全不重叠。选择规则预先固定：
-
-1. EFF 相对 frozen baseline 的 EM 至少 `+0.01`，相对 Grouped-EM 也至少 `+0.01`；F1 与单跳表现相对两者都不下降，并满足 evidence、搜索、重复与长度护栏时，选择 `eff`。
-2. 否则，如果 Grouped-EM 相对 frozen baseline 的 EM 至少 `+0.01`，同时满足同类护栏，选择 `grouped_em`。
-3. 两者都不满足时，`selected_candidate=null`，停止实验，不查看最终 700 题。
-
-140 题上的 EM 只能按 `1/140` 变化，所以 `+0.01` 实际要求至少净增加 2 个正确样本。它是筛选阈值，不是显著性证明。
-
-### Phase 3：固定 700 题最终检验
-
-最终主比较把冻结 baseline checkpoint、Grouped-EM 与 EFF 三个模型都放入同一个 V2 严格评测入口，使用同一固定数据、batch 28、driver seed 42、vLLM engine seed 42 与记录器。V1 已冻结的旧 baseline 轨迹仍会离线严格重评分并报告 parser mismatch 数，但它只作为历史一致性审计，不进入 V2 主比较。pilot gate 绑定三份 pilot JSONL 的 SHA-256；最终入口只能验证既有锁，不能重算或覆盖候选选择。
-
-主结论只能针对 pilot 已锁定的候选，且最终有意义改进阈值统一为相关主比较 `Delta EM >= +0.02`：
-
-```text
-预声明成功：最终 EM 至少增加 0.02，并满足预设护栏
-统计支持：paired bootstrap 95% CI 下界 > 0，且 exact McNemar p < 0.05
-无效：EM 不满足条件，即使搜索更少或响应更短也按失败报告
-```
-
-## 7. 文件隔离
-
-V1 保持：
-
-```text
-分支：codex/search-r1-improvement
-baseline checkpoint：search-r1-course-qwen2.5-1.5b-grpo-bm25/.../global_step_120
-CEGR V1 checkpoint：search-r1-cegr-qwen2.5-1.5b-grpo-bm25/.../global_step_120
-结果：artifacts/improvement
-```
-
-V2 只写：
-
-```text
-分支：codex/search-r1-cegr-v2
-Grouped-EM checkpoint：search-r1-cegr-v2-em-control-qwen2.5-1.5b-grpo-bm25
-EFF checkpoint：search-r1-cegr-v2-qwen2.5-1.5b-grpo-bm25
-结果：artifacts/improvement-v2
-代码：scripts/improvement_v2
-```
-
-V2 不修改 `search_r1/`、`verl/`、`scripts/improvement/`，也不覆盖任何 V1 run name。资产链接器要求 V1 checkout 的 `HEAD` 精确等于 `8672aad0f4089f0fca388601cd9ce20fc9b8b776` 且无 tracked diff；冻结清单覆盖两个 step120 checkpoint、V1 结果、V1 代码以及 baseline/CEGR 两套原评测目录，并检测冻结目录中后来新增的文件。
-
-## 8. 云端操作步骤
-
-下面按新手可直接执行的顺序编写。命令成功后再进入下一小节。
-
-### 8.1 找到保存完整 V1 的目录
-
-先执行：
+登录服务器后先不要下载或训练，执行：
 
 ```bash
-for d in /root/autodl-tmp/Search-R1-improvement /root/autodl-tmp/Search-R1; do
-  if [ -s "$d/verl_checkpoints/search-r1-course-qwen2.5-1.5b-grpo-bm25/actor/global_step_120/config.json" ]; then
-    echo "V1_ROOT=$d"
-  fi
-done
+nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader
+free -h
+df -h /root/autodl-tmp
+df -h /dev/shm
+nvcc --version
 ```
 
-记住输出的目录。下文假设它是：
+继续实验前应看到：
+
+```text
+GPU 为 A800 80GB
+内存建议不低于 110 GiB
+/root/autodl-tmp 可用空间不低于 420 GiB
+/dev/shm 建议至少 32 GiB
+nvcc 可以正常输出版本
+```
+
+若数据盘只显示约 50 GB，立即关机并在平台控制台处理扩容，不要开始下载。
+
+## 5. 确认 V1 资产仍在
+
+以下命令假定完成 V1 的目录是 `/root/autodl-tmp/Search-R1-improvement`。若实际目录不同，只修改第一行：
 
 ```bash
 export V1_ROOT=/root/autodl-tmp/Search-R1-improvement
+test -d "$V1_ROOT" || { echo "找不到 V1_ROOT"; exit 1; }
+git -C "$V1_ROOT" rev-parse HEAD
+git -C "$V1_ROOT" status --short
 ```
 
-如果实际输出是 `/root/autodl-tmp/Search-R1`，就把上面一行改成那个路径。
+第一条 Git 命令必须输出：
 
-### 8.2 克隆独立 V2 分支
+```text
+8672aad0f4089f0fca388601cd9ce20fc9b8b776
+```
+
+`status --short` 应无输出。再检查关键资产：
 
 ```bash
+test -s "$V1_ROOT/data/models/Qwen2.5-1.5B-Instruct/config.json"
+test -s "$V1_ROOT/verl_checkpoints/search-r1-course-qwen2.5-1.5b-grpo-bm25/actor/global_step_120/config.json"
+test -s "$V1_ROOT/artifacts/improvement/paired-evaluation/baseline.jsonl"
+test -d "$V1_ROOT/data/wiki18_bm25/bm25"
+echo "V1 关键资产存在"
+```
+
+任一 `test` 失败都先停止。应从已保存的数据盘或证据备份恢复 V1，不要临时重训 baseline。
+
+## 6. 获取 V2 代码
+
+推荐使用独立目录，避免触碰冻结的 V1：
+
+```bash
+export V2_ROOT=/root/autodl-tmp/Search-R1-cegr-v2
 cd /root/autodl-tmp
 git clone --branch codex/search-r1-cegr-v2 \
-  git@github.com:heba324/Search-R1.git Search-R1-cegr-v2
-cd /root/autodl-tmp/Search-R1-cegr-v2
+  https://github.com/heba324/Search-R1.git "$V2_ROOT"
+cd "$V2_ROOT"
+git branch --show-current
+git rev-parse HEAD
 git status --short --branch
 ```
 
-应看到当前分支为 `codex/search-r1-cegr-v2`，且没有未提交修改。
-
-### 8.3 只链接 V1 输入，不共享 V2 输出目录
+若该 V2 目录已经存在，不要再次 clone，改用：
 
 ```bash
-V1_ROOT="$V1_ROOT" bash scripts/improvement_v2/link_v1_assets.sh
+export V2_ROOT=/root/autodl-tmp/Search-R1-cegr-v2
+cd "$V2_ROOT"
+git fetch origin
+git switch codex/search-r1-cegr-v2
+git pull --ff-only origin codex/search-r1-cegr-v2
+git rev-parse HEAD
+git status --short --branch
 ```
 
-该脚本只链接训练数据、模型资源、BM25 资源、两个 V1 checkpoint 和冻结的 V1 结果。V2 checkpoint、pilot 和 `artifacts/improvement-v2` 都留在新目录。
+最终提交哈希以交付消息和仓库分支最新提交为准。把 `git rev-parse HEAD` 输出记进实验记录。
 
-检查：
+## 7. 链接 V1 资产并做离线预检
+
+V2 只链接模型、数据、baseline checkpoint 和冻结证据；V2 输出保留在新目录：
 
 ```bash
-ls -l data
-ls -l verl_checkpoints
-ls -l artifacts
+cd "$V2_ROOT"
+V1_ROOT="$V1_ROOT" bash scripts/improvement_v2/link_assets.sh
+bash scripts/improvement_v2/prepare.sh
 ```
 
-### 8.4 建立冻结清单并运行全部离线检查
+`prepare.sh` 会检查 V1 哈希、生成不重叠 pilot、运行全部单元测试、编译 Python、检查所有 shell 语法，并确认 V2 没有修改 `search_r1/` 或 `verl/`。
 
-```bash
-bash scripts/improvement_v2/prepare_experiment.sh
-```
-
-成功标志：
+只有最后看到以下文字才继续：
 
 ```text
-CEGR V1 freeze verified
-全部 unittest 通过
-CEGR V2 offline preparation passed
+CEGR V2 offline preparation passed.
 ```
 
-这一步会生成：
-
-```text
-artifacts/improvement-v2/v1-frozen-manifest.json
-data/improvement_v2/pilot.parquet
-data/improvement_v2/pilot_manifest.json
-artifacts/improvement-v2/preflight/
-```
-
-任一失败都不要启动训练。
-
-### 8.5 启动 CPU BM25 服务
-
-在第一个终端执行：
+检查 Conda 环境仍存在：
 
 ```bash
-cd /root/autodl-tmp/Search-R1-cegr-v2
+conda env list
+```
+
+应至少有：
+
+```text
+Search-R1
+Search-R1-retriever
+```
+
+## 8. 启动 BM25 检索服务
+
+新建第一个 tmux 会话：
+
+```bash
+tmux new -s bm25
+cd "$V2_ROOT"
 bash scripts/course_reproduction/launch_bm25_retriever.sh
 ```
 
-保持这个终端运行。在第二个终端执行：
+看到服务启动后，按 `Ctrl+B`，松开，再按 `D`，让它在后台继续运行。
+
+回到普通终端后验证：
 
 ```bash
-cd /root/autodl-tmp/Search-R1-cegr-v2
+cd "$V2_ROOT"
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate Search-R1
-python scripts/course_reproduction/check_retriever.py
+python -m scripts.course_reproduction.check_retriever
 ```
 
-只有检索检查通过才继续。
+检索检查失败时不要训练。可用 `tmux attach -t bm25` 查看服务报错。
 
-### 8.6 运行 2 步 smoke
+## 9. 运行 2 步冒烟
+
+新建第二个 tmux 会话：
 
 ```bash
-cd /root/autodl-tmp/Search-R1-cegr-v2
+tmux new -s direct120-smoke
+cd "$V2_ROOT"
 bash scripts/improvement_v2/run_smoke.sh
 ```
 
-成功后检查：
+它会检查：
 
-```bash
-cat artifacts/improvement-v2/search-r1-cegr-v2-smoke/reward_metrics.json
-cat artifacts/improvement-v2/search-r1-cegr-v2-smoke/training_completed.txt
+```text
+原始 Qwen 模型能加载
+BM25 能返回结果
+分组固定为同题 5 条 rollout
+EFF fallback 在 2 步内产生至少 10% 的有效稠密信号
+没有 NaN/Inf
+global_step_2 checkpoint、日志、奖励指标和完成标记齐全
 ```
 
-如果脚本因 `informative fallback rate` 低于 `0.10` 退出，这是科学上的 no-go，不应通过删除门禁强行继续。
-
-### 8.7 运行两条 40 步候选训练
+成功后执行：
 
 ```bash
-bash scripts/improvement_v2/run_pilot.sh
+cd "$V2_ROOT"
+cat artifacts/improvement-v2/search-r1-cegr-v2-eff-direct120-smoke/training_completed.txt
+python -m scripts.improvement_v2.verify_training \
+  --repo-root "$V2_ROOT" \
+  --run-name search-r1-cegr-v2-eff-direct120-smoke \
+  --method eff --steps 2 --group-size 5 --minimum-signal 0.10 \
+  --seed 42 \
+  --initial-model "$V2_ROOT/data/models/Qwen2.5-1.5B-Instruct" \
+  --train-batch-size 8 --learning-rate 1e-6 --lr-warmup-ratio 0.95
 ```
 
-脚本先跑 Grouped-EM，再跑 EFF。每条都在 20、40 步保存 checkpoint。若某条已经完整完成，重新执行时会重新验真后保留并跳过；若 marker、日志、指标或 checkpoint 任一不完整，会停止并要求先检查，不会覆盖。
+必须看到 `Verified completed V2 run`。2 步 checkpoint 仅用于验收，不作为 120 步的起点。
 
-训练时另开终端监控：
+若冒烟失败，不要删除目录后假装成功，也不要调低门槛。保留 `train.log`、`reward_metrics.json` 和报错，先定位 OOM、检索中断、NaN 或 fallback 无信号。
+
+## 10. 直接运行正式 120 步
+
+冒烟通过后可立即开始，无需再做 10 步测速：
+
+```bash
+tmux new -s direct120-train
+cd "$V2_ROOT"
+bash scripts/improvement_v2/run_train.sh
+```
+
+按 `Ctrl+B`、再按 `D` 退出 tmux。监控方法：
 
 ```bash
 watch -n 2 nvidia-smi
 ```
 
-训练完成后应同时存在：
+另一个终端查看日志：
 
 ```bash
-test -s verl_checkpoints/search-r1-cegr-v2-em-control-qwen2.5-1.5b-grpo-bm25/actor/global_step_40/config.json
-test -s verl_checkpoints/search-r1-cegr-v2-qwen2.5-1.5b-grpo-bm25/actor/global_step_40/config.json
-echo $?
+tail -f "$V2_ROOT/artifacts/improvement-v2/search-r1-cegr-v2-eff-direct120-qwen2.5-1.5b-grpo-bm25/train.log"
 ```
 
-最后应输出 `0`。
-
-### 8.8 运行独立 pilot 评测并锁定候选
+恢复训练窗口：
 
 ```bash
-bash scripts/improvement_v2/evaluate_pilot.sh
+tmux attach -t direct120-train
 ```
 
-查看：
-
-```bash
-cat artifacts/improvement-v2/pilot-evaluation/step-40/pilot-gate.json
-```
-
-关键字段：
+脚本会保存：
 
 ```text
-"passed": true
-"selected_candidate": "eff"
+verl_checkpoints/search-r1-cegr-v2-eff-direct120-qwen2.5-1.5b-grpo-bm25/actor/global_step_40
+verl_checkpoints/search-r1-cegr-v2-eff-direct120-qwen2.5-1.5b-grpo-bm25/actor/global_step_80
+verl_checkpoints/search-r1-cegr-v2-eff-direct120-qwen2.5-1.5b-grpo-bm25/actor/global_step_120
 ```
 
-或者：
-
-```text
-"passed": true
-"selected_candidate": "grouped_em"
-```
-
-若 `passed` 为 `false`，脚本会非零退出。此时停止，不运行最终评测，并把 gate、三份 JSONL 和训练日志保留为负结果。
-
-通过时，`pilot-gate.json` 内含三份轨迹的 SHA-256 和锁定候选。文件已存在时脚本只允许内容完全一致，不会覆盖；后续任一轨迹或候选字段变化都会使最终入口失败。
-
-### 8.9 仅在 pilot 通过后运行最终 700 题
+正式完成后校验：
 
 ```bash
-bash scripts/improvement_v2/evaluate_final.sh
+cd "$V2_ROOT"
+bash scripts/improvement_v2/run_train.sh
+cat artifacts/improvement-v2/search-r1-cegr-v2-eff-direct120-qwen2.5-1.5b-grpo-bm25/training_completed.txt
 ```
 
-最终报告入口：
+第二次调用不会重训；它只验证已有完整结果。若第一次中断，脚本会拒绝覆盖残留现场。此时不要直接重跑，应先保留日志并分析故障。
+
+## 11. 公平复评 baseline 和 EFF120
+
+确认 BM25 tmux 仍在运行：
 
 ```bash
-cat artifacts/improvement-v2/final-evaluation/step-40/final-analysis.json
-cat artifacts/improvement-v2/final-evaluation/step-40/baseline-rescore.json
-head artifacts/improvement-v2/final-evaluation/step-40/historical-baseline-rescored.jsonl
+tmux ls
+cd "$V2_ROOT"
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate Search-R1
+python -m scripts.course_reproduction.check_retriever
 ```
 
-重点读取：
+开始两次固定 700 题评测：
+
+```bash
+tmux new -s direct120-eval
+cd "$V2_ROOT"
+bash scripts/improvement_v2/run_evaluation.sh
+```
+
+该脚本依次完成：
 
 ```text
-effectiveness.selected_candidate
+校验 V1 冻结证据
+严格重算历史 baseline 轨迹，仅作审计
+用当前统一评测器重新生成 baseline 的 700 条轨迹
+用同一评测器生成 EFF120 的 700 条轨迹
+做逐题配对、Bootstrap 95% CI 和 exact McNemar 检验
+```
+
+这里是复评旧 checkpoint，不是重新训练 baseline。
+
+## 12. 查看最终结果
+
+```bash
+cd "$V2_ROOT"
+export RESULT=artifacts/improvement-v2/direct120-final-evaluation/step-120/direct120-analysis.json
+test -s "$RESULT"
+python -m json.tool "$RESULT" | less
+```
+
+重点查看：
+
+```text
+comparison.overall.em_delta
+comparison.overall.f1_delta
+comparison.overall.em_delta_bootstrap_95_ci
+comparison.overall.mcnemar_exact_p
 effectiveness.predeclared_success
-effectiveness.statistically_supported_for_selected_candidate
+effectiveness.statistically_supported
+effectiveness.primary_metric_pass
+effectiveness.guardrails_pass
 effectiveness.claim_level
+causal_limit
 ```
 
-### 8.10 归档证据
+预注册成功门槛是：整体 EM 至少提高 `0.02`，F1 不下降，single-hop EM 不下降，同时证据覆盖、有效搜索、重复搜索和响应长度不越过安全边界。统计支持还要求 EM 的 Bootstrap 95% CI 下界大于 0，且 McNemar `p < 0.05`。
+
+结果解释：
+
+```text
+statistically_supported_improvement
+  可以写“在本实验设置下获得统计支持的整体改进”。
+
+directional_improvement
+  可以写“达到预注册效果门槛，但统计证据不足”。
+
+not_effective_on_primary_metric
+  必须写“未达到预注册主要指标门槛”，继续分析失败原因，不能宣称有效。
+
+primary_gain_with_guardrail_failure
+  EM 达到主要门槛，但至少一项次要安全护栏失败；必须准确报告是哪项护栏失败，不能写成完整改进成功。
+```
+
+无论结果正负，都只能归因于“分组修复 + EFF 整体方案”。没有 Grouped-EM-120 新对照时，不能写“实验证明 F1 fallback 单独带来提升”。
+
+## 13. 收集与备份证据
 
 ```bash
-bash scripts/improvement_v2/collect_evidence.sh
+cd "$V2_ROOT"
+REQUIRE_FINAL_CHECKPOINT=true bash scripts/improvement_v2/collect_evidence.sh
+ls -lh artifacts/improvement-v2/evidence/
+cd artifacts/improvement-v2/evidence
+sha256sum -c search-r1-cegr-v2-evidence.tar.gz.sha256
+tar -tzf search-r1-cegr-v2-evidence.tar.gz | \
+  grep 'search-r1-cegr-v2-eff-direct120-qwen2.5-1.5b-grpo-bm25/actor/global_step_120/config.json'
+cd "$V2_ROOT"
 ```
 
-得到：
+至少保存：
 
 ```text
-artifacts/improvement-v2/evidence/search-r1-cegr-v2-evidence.tar.gz
-artifacts/improvement-v2/evidence/search-r1-cegr-v2-evidence.tar.gz.sha256
+search-r1-cegr-v2-evidence.tar.gz
+search-r1-cegr-v2-evidence.tar.gz.sha256
+direct120-analysis.json
+EFF120 的 global_step_120 checkpoint
+W&B 曲线或训练日志
 ```
 
-## 9. 成本计算
+启用最终 checkpoint 门禁后，checkpoint 缺失会直接失败；成功时完整 `global_step_120` 会进入证据压缩包。确认压缩包已下载、SHA-256 校验成功且上述 `tar -tzf` 能找到 checkpoint 后，才关闭并释放云实例。
 
-本方案的新训练更新总数是：
+在你自己的 Windows PowerShell 中下载时，把尖括号内容替换为租机页面的 SSH 信息：
+
+```powershell
+scp -P <SSH端口> root@<服务器地址>:/root/autodl-tmp/Search-R1-cegr-v2/artifacts/improvement-v2/evidence/search-r1-cegr-v2-evidence.tar.gz .
+scp -P <SSH端口> root@<服务器地址>:/root/autodl-tmp/Search-R1-cegr-v2/artifacts/improvement-v2/evidence/search-r1-cegr-v2-evidence.tar.gz.sha256 .
+```
+
+下载后在 Windows PowerShell 校验：
+
+```powershell
+$Expected = (Get-Content .\search-r1-cegr-v2-evidence.tar.gz.sha256).Split()[0].ToUpper()
+$Actual = (Get-FileHash .\search-r1-cegr-v2-evidence.tar.gz -Algorithm SHA256).Hash
+if ($Actual -ne $Expected) { throw "SHA-256 校验失败" }
+Write-Host "SHA-256 校验通过: $Actual"
+```
+
+若平台不开放 `scp`，使用平台文件管理器下载同名两个文件。checkpoint 已装入压缩包，不必再单独逐文件下载模型目录。
+
+## 14. 报告中的准确表述
+
+推荐写法：
+
+> 在资源和时间受限条件下，本实验复用已完成的 120 步 Search-R1 baseline checkpoint，并从同一 Qwen2.5-1.5B-Instruct 初始模型训练 120 步 CEGR V2 EFF 模型。两者使用统一固定 700 题协议重新评测。该对比估计分组修复与 EM-First F1-Fallback 的组合效果；由于未新增 Grouped-EM-120 对照，不对 F1 fallback 的独立因果贡献作结论。
+
+不能写：
 
 ```text
-smoke 2 步 + Grouped-EM 40 步 + EFF 40 步 = 82 步
+只看旧日志就说新模型优于 baseline
+把 2 步 checkpoint 接着训练并声称双方都是独立 120 步
+没有 Grouped-EM-120 却声称 F1 fallback 单独有效
+未达到门槛仍写“改进成功”
 ```
 
-训练成本可用你已经完成的 V1 实测速度估计：
+## 15. 最短命令清单
 
-```text
-新训练时长约等于 V1 120 步训练时长 × 82 / 120
+前面的检查全部通过后，真正执行阶段只有三条：
+
+```bash
+bash scripts/improvement_v2/run_smoke.sh
+bash scripts/improvement_v2/run_train.sh
+bash scripts/improvement_v2/run_evaluation.sh
 ```
 
-另加 140 题 pilot 的三次评测，以及最终三次 700 题评测。最终 baseline 也重新走 V2 严格评测入口，以消除新旧评测执行与 vLLM seed 的混杂；旧 baseline 轨迹仅做低成本离线 parser 审计。因此预算必须包含三套模型的最终生成，不能沿用旧版“两次 700 题”的估算。
-
-准确费用必须以 smoke 的真实耗时计算：
-
-```text
-费用 = 总运行小时 × 租机页面当前每小时价格
-```
-
-不要在 smoke 前承诺固定金额。
-
-## 10. 最终实验报告结构
-
-GPU 结果产生后，报告按以下顺序完成：
-
-1. 研究背景：搜索增强推理、结果奖励稀疏性与 Search-R1。
-2. 原方法复现：课程资源版配置、baseline 训练和七数据集评测。
-3. CEGR V1：动机、公式、实现、负结果与统计检验。
-4. 失败诊断：singleton `uid`、parser 漂移、代理目标反转及因果边界。
-5. 文献调研：Search-R1、GRPO/DAPO、R1-Searcher、ReSearch、LeTS、中间检索奖励与 reward misspecification。
-6. CEGR V2：Grouped-EM 与 EFF 公式、局部保证、删除的奖励项。
-7. 实验设计：冻结起点、双臂、seed、disjoint pilot、候选选择和最终 700 题。
-8. 结果：训练信号、pilot gate、最终 EM/F1、搜索行为、单跳/多跳、Bootstrap 与 McNemar。
-9. 消融与归因：`EFF - Grouped-EM` 判断 F1 fallback；`Grouped-EM - frozen` 只称复合 refinement 效果。
-10. 局限：单 seed、1.5B、BM25、40 步 warm-start、最终样本规模与 CUDA 非完全确定性。
-11. 结论：严格按照 `claim_level` 写；pilot 的 `+0.01` 只是筛选阈值，最终 `+0.02` 才是预声明的有意义改进门槛，不把效率变化冒充准确率提升。
-
-报告中的数值必须从 `pilot-gate.json`、`final-analysis.json` 和训练日志读取。若候选没有通过，不改门槛、不换表述掩盖失败，而是把它作为第二个负结果并据此转向 V3。
-
-## 11. 关键参考文献
-
-- Search-R1: Training LLMs to Reason and Leverage Search Engines with Reinforcement Learning, 2025. <https://arxiv.org/abs/2503.09516>
-- DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models, 2024. <https://arxiv.org/abs/2402.03300>
-- DAPO: An Open-Source LLM Reinforcement Learning System at Scale, 2025. <https://arxiv.org/abs/2503.14476>
-- R1-Searcher: Incentivizing the Search Capability in LLMs via Reinforcement Learning, 2025. <https://arxiv.org/abs/2503.05592>
-- ReSearch: Learning to Reason with Search for LLMs via Reinforcement Learning, 2025. <https://arxiv.org/abs/2503.19470>
-- Search Wisely: Mitigating Over- and Under-searching in RAG, 2025. <https://arxiv.org/abs/2505.17281>
-- LeTS: Learning to Search for LLMs, 2025. <https://arxiv.org/abs/2505.17447>
-- An Empirical Study on Reinforcement Learning for Reasoning-Search Interleaved LLM Agents, 2025. <https://arxiv.org/abs/2505.15117>
-- Ng, Harada, Russell. Policy Invariance under Reward Transformations, 1999. <https://people.eecs.berkeley.edu/~russell/papers/icml99-shaping.pdf>
-- Gao et al. Scaling Laws for Reward Model Overoptimization, 2023. <https://proceedings.mlr.press/v202/gao23h.html>
+每一条必须成功结束后才能执行下一条。不要并行训练和评测，不要同时启动第二个 GPU 任务。

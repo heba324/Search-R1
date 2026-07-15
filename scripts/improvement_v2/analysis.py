@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Analyze the time-constrained equal-update baseline versus EFF120 experiment."""
+"""Analyze the completed equal-update baseline versus CEGR V2 experiment."""
 
 from __future__ import annotations
 
@@ -9,14 +9,14 @@ import json
 from pathlib import Path
 
 from scripts.improvement.analyze_paired_results import analyze_pairs
-from scripts.improvement_v2.direct120_contract import DIRECT120
+from scripts.improvement_v2.config import EXPERIMENT
 from scripts.paper_v1.contract import REQUIRED_EVALUATION_DATASETS
 
 
-MINIMUM_EM_GAIN = DIRECT120.minimum_em_gain
+MINIMUM_EM_GAIN = EXPERIMENT.minimum_em_gain
 
 
-def analyze_direct120(
+def analyze_experiment(
     baseline,
     improved,
     expected_datasets=REQUIRED_EVALUATION_DATASETS,
@@ -36,7 +36,7 @@ def analyze_direct120(
         "equal-update original Search-R1 baseline versus group-corrected EFF120"
     )
     overall = comparison["overall"]
-    criteria = DIRECT120.success
+    criteria = EXPERIMENT.success
     try:
         single_hop_delta = comparison["groups"]["single_hop"]["em_delta"]
         response_growth = overall["response_tokens_delta"] / max(
@@ -50,7 +50,7 @@ def analyze_direct120(
         }
     except KeyError as error:
         raise ValueError(
-            f"Direct120 evaluation is missing required metric: {error}"
+            f"CEGR V2 evaluation is missing required metric: {error}"
         ) from error
 
     primary_metric_pass = overall["em_delta"] >= MINIMUM_EM_GAIN
@@ -69,23 +69,24 @@ def analyze_direct120(
         and overall["mcnemar_exact_p"] < 0.05
     )
     if predeclared_success and statistically_supported:
-        claim_level = "statistically_supported_direct120_improvement"
+        claim_level = "statistically_supported_improvement"
     elif predeclared_success:
-        claim_level = "directional_direct120_improvement"
+        claim_level = "directional_improvement"
     elif not primary_metric_pass:
         claim_level = "not_effective_on_primary_metric"
     else:
         claim_level = "primary_gain_with_guardrail_failure"
     return {
-        "protocol_id": DIRECT120.protocol_id,
+        "protocol_id": EXPERIMENT.protocol_id,
         "scope": (
-            "time-constrained single-new-arm experiment; baseline and EFF both "
-            "start from Qwen2.5-1.5B and receive 120 updates"
+            "single-new-arm experiment; baseline and EFF both start from "
+            "Qwen2.5-1.5B and receive 120 updates"
         ),
         "causal_limit": (
             "The contrast estimates the combined grouping-plus-EFF method under "
-            "a reused historical baseline. It does not isolate F1 fallback from "
-            "group correction and is not a newly randomized two-arm trial."
+            "a reused historical baseline checkpoint that was freshly evaluated. "
+            "It does not isolate F1 fallback from group correction and is not a "
+            "newly randomized two-arm trial."
         ),
         "comparison": comparison,
         "effectiveness": {
@@ -119,7 +120,7 @@ def main():
     parser.add_argument("--bootstrap-samples", type=int, default=10000)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
-    result = analyze_direct120(
+    result = analyze_experiment(
         _read_jsonl(args.baseline),
         _read_jsonl(args.improved),
         expected_per_dataset=args.expected_per_dataset,
@@ -130,7 +131,7 @@ def main():
     args.output.write_text(
         json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
-    print(f"Direct120 analysis: {args.output}")
+    print(f"CEGR V2 analysis: {args.output}")
 
 
 if __name__ == "__main__":

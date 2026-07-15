@@ -7,6 +7,14 @@
 > 严格复现论文表格数值。仓库 v0.3 和第二篇经验研究只作为改进设计参考。
 > 操作入口见 [课程手册](docs/course_reproduction_zh.md)。
 
+> **课程实验代码：** 资源受限 baseline 位于 `scripts/course_reproduction/`，
+> CEGR V1 位于 `scripts/improvement/`，最终 CEGR V2 位于
+> `scripts/improvement_v2/`。V2 的唯一正式流程为
+> `prepare.sh -> run_smoke.sh -> run_train.sh -> run_evaluation.sh -> collect_evidence.sh`。
+> 方法、结果和文献依据分别见 [V2 手册](docs/cegr_v2_experiment_zh.md)、
+> [结果记录](docs/research/cegr_v2_results_zh.md)与
+> [文献调研](docs/research/cegr_v2_literature_review.md)。
+
 <strong>Search-R1</strong> is an extension of <strong>DeepSeek-R1(-Zero)</strong> methods for <em>training reasoning and searching (tool-call) interleaved LLMs</em>. We built upon [veRL](https://github.com/volcengine/verl).
 
 Through RL (rule-based outcome reward), the 3B **base** LLM (both Qwen2.5-3b-base and Llama3.2-3b-base) develops reasoning and search engine calling abilities all on its own.

@@ -44,7 +44,7 @@ if marker.get("rollout_engine_seed") != engine_seed:
 PY
   TEMP_PARITY="$(mktemp)"
   trap 'rm -f "$TEMP_PARITY"' EXIT
-  python3 -m scripts.improvement_v2.verify_evaluation_records \
+  python3 -m scripts.improvement_v2.verify_evaluation \
     "$MARKER" "$TRAJECTORIES_PATH" "$TEMP_PARITY"
   rm -f "$TEMP_PARITY"
   trap - EXIT
@@ -68,7 +68,7 @@ export PYTHONHASHSEED="$SEED"
 export SEARCH_R1_EVAL_TRAJECTORIES="$TRAJECTORIES_PATH"
 START_TIME="$(date +%s)"
 
-python3 -m scripts.improvement_v2.main_ppo_refinement \
+python3 -m scripts.improvement_v2.main \
   data.train_files="$EVAL_DATA" data.val_files="$EVAL_DATA" \
   data.train_data_num=null data.val_data_num=null \
   data.train_batch_size="$EVAL_BATCH_SIZE" data.val_batch_size="$EVAL_BATCH_SIZE" \
@@ -112,7 +112,7 @@ payload["rollout_engine_seed"] = int(sys.argv[3])
 path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 PY
 [ -s "$TRAJECTORIES_PATH" ] || { echo "Evaluation produced no trajectory records" >&2; exit 1; }
-python3 -m scripts.improvement_v2.verify_evaluation_records \
+python3 -m scripts.improvement_v2.verify_evaluation \
   "$MARKER.tmp" "$TRAJECTORIES_PATH" "$PARITY"
 mv "$MARKER.tmp" "$MARKER"
 echo "CEGR V2 evaluation completed: $MARKER"

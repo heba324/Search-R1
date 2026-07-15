@@ -9,7 +9,7 @@ from scripts.improvement.cegr_reward import (
     normalize_answer,
     token_f1,
 )
-from scripts.improvement_v2.cegr_v2_reward import extract_final_answer
+from scripts.improvement_v2.reward import extract_final_answer
 
 
 SEARCH_PATTERN = re.compile(r"<search>\s*(.*?)\s*</search>", re.DOTALL)
