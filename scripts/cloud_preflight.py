@@ -18,9 +18,24 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 MIB_PER_GIB = 1024
 POLICIES: Dict[str, Dict[str, int]] = {
-    "smoke": {"gpus": 1, "vram_mib": 75 * MIB_PER_GIB, "ram_gib": 64, "disk_gib": 100},
-    "full": {"gpus": 8, "vram_mib": 40 * MIB_PER_GIB, "ram_gib": 128, "disk_gib": 500},
+    "smoke": {
+        "gpus": 1,
+        "vram_mib": 75 * MIB_PER_GIB,
+        "ram_gib": 64,
+        "disk_gib": 100,
+        "shared_memory_gib": 8,
+    },
+    "full": {
+        "gpus": 8,
+        "vram_mib": 40 * MIB_PER_GIB,
+        "ram_gib": 128,
+        "disk_gib": 500,
+        "shared_memory_gib": 16,
+    },
 }
+CUDA_121_MIN_DRIVER = (525, 60)
+REQUIRED_BUILD_TOOLS = ("nvcc", "gcc", "g++", "make")
+RECOMMENDED_OPEN_FILE_LIMIT = 65535
 NETWORK_URLS = (
     "https://github.com/heba324/Search-R1",
     "https://huggingface.co/Qwen/Qwen2.5-3B/resolve/main/config.json",
@@ -40,6 +55,14 @@ class HardwareInfo:
     gpu_memory_mib: Tuple[int, ...]
     ram_gib: int
     disk_gib: int
+
+
+@dataclass(frozen=True)
+class RuntimeInfo:
+    driver_version: str
+    shared_memory_gib: int
+    build_tools: Tuple[str, ...]
+    open_file_limit: int
 
 
 def parse_gpu_memory(output: str) -> Tuple[int, ...]:
@@ -92,6 +115,55 @@ def assess_hardware(profile: str, info: HardwareInfo) -> List[str]:
     return errors
 
 
+def parse_driver_version(version: str) -> Tuple[int, int]:
+    """Return the major and minor parts of an NVIDIA driver version."""
+    parts = version.strip().split(".")
+    if len(parts) < 2 or not all(part.isdigit() for part in parts[:2]):
+        raise ValueError(f"Invalid NVIDIA driver version: {version!r}")
+    return int(parts[0]), int(parts[1])
+
+
+def assess_runtime(profile: str, info: RuntimeInfo) -> Tuple[List[str], List[str]]:
+    """Return blocking errors and advisory warnings for the selected profile."""
+    if profile not in POLICIES:
+        raise ValueError(f"Unknown profile: {profile}")
+
+    errors: List[str] = []
+    warnings: List[str] = []
+    try:
+        driver_version = parse_driver_version(info.driver_version)
+    except ValueError as exc:
+        errors.append(str(exc))
+    else:
+        if driver_version < CUDA_121_MIN_DRIVER:
+            minimum = ".".join(str(value) for value in CUDA_121_MIN_DRIVER)
+            errors.append(
+                f"CUDA 12.1 requires NVIDIA driver {minimum} or newer; "
+                f"found {info.driver_version}. Choose a newer GPU image or host."
+            )
+
+    missing_tools = [tool for tool in REQUIRED_BUILD_TOOLS if tool not in info.build_tools]
+    if missing_tools:
+        errors.append(
+            "Required CUDA build tools are unavailable: "
+            f"{', '.join(missing_tools)}. Select a CUDA development image with nvcc, gcc, g++, and make."
+        )
+
+    required_shared_memory = POLICIES[profile]["shared_memory_gib"]
+    if info.shared_memory_gib < required_shared_memory:
+        errors.append(
+            f"{profile} requires at least {required_shared_memory} GiB available at /dev/shm; "
+            f"found {info.shared_memory_gib} GiB. Start the container with a larger --shm-size."
+        )
+
+    if info.open_file_limit < RECOMMENDED_OPEN_FILE_LIMIT:
+        warnings.append(
+            f"Open-file limit is {info.open_file_limit}; run 'ulimit -n {RECOMMENDED_OPEN_FILE_LIMIT}' "
+            "in each tmux shell before launching Retriever or Ray."
+        )
+    return errors, warnings
+
+
 def run_command(command: Sequence[str]) -> str:
     completed = subprocess.run(
         command,
@@ -122,6 +194,27 @@ def collect_hardware(repo_root: Path) -> HardwareInfo:
         gpu_memory_mib=collect_gpu_memory(),
         ram_gib=collect_ram_gib(),
         disk_gib=free_disk_gib,
+    )
+
+
+def collect_runtime() -> RuntimeInfo:
+    driver_output = run_command(
+        ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"]
+    )
+    driver_versions = {line.strip() for line in driver_output.splitlines() if line.strip()}
+    if len(driver_versions) != 1:
+        raise ValueError(f"Expected one NVIDIA driver version; found {sorted(driver_versions)!r}")
+
+    shared_memory_gib = shutil.disk_usage("/dev/shm").free // (MIB_PER_GIB**3)
+    available_tools = tuple(tool for tool in REQUIRED_BUILD_TOOLS if shutil.which(tool) is not None)
+    import resource
+
+    open_file_limit = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
+    return RuntimeInfo(
+        driver_version=next(iter(driver_versions)),
+        shared_memory_gib=shared_memory_gib,
+        build_tools=available_tools,
+        open_file_limit=open_file_limit,
     )
 
 
@@ -174,6 +267,13 @@ def print_hardware(info: HardwareInfo) -> None:
     print(f"Free disk: {info.disk_gib} GiB")
 
 
+def print_runtime(info: RuntimeInfo) -> None:
+    print(f"NVIDIA driver: {info.driver_version}")
+    print(f"/dev/shm free: {info.shared_memory_gib} GiB")
+    print(f"CUDA build tools: {', '.join(info.build_tools) or 'none'}")
+    print(f"Open-file limit: {info.open_file_limit}")
+
+
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", choices=sorted(POLICIES), required=True)
@@ -191,6 +291,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parse_args(argv)
     repo_root = args.repo_root.resolve()
     errors: List[str] = []
+    warnings: List[str] = []
     commit: Optional[str] = None
 
     print(f"Search-R1 cloud preflight profile: {args.profile}")
@@ -216,6 +317,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         except (OSError, ValueError, subprocess.SubprocessError, StopIteration) as exc:
             errors.append(f"Unable to collect hardware information: {exc}")
 
+    if platform.system() == "Linux" and shutil.which("nvidia-smi") is not None:
+        try:
+            runtime = collect_runtime()
+            print_runtime(runtime)
+            runtime_errors, runtime_warnings = assess_runtime(args.profile, runtime)
+            errors.extend(runtime_errors)
+            warnings.extend(runtime_warnings)
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            errors.append(f"Unable to collect runtime information: {exc}")
+
     if not args.skip_network:
         errors.extend(check_network())
 
@@ -229,6 +340,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print("Preflight failed to record a Git commit.", file=sys.stderr)
         return 1
     print(f"Git commit: {commit}")
+    for warning in warnings:
+        print(f"Preflight warning: {warning}")
     print(f"Preflight passed for profile: {args.profile}")
     if args.profile == "smoke":
         print("This authorizes a startup smoke test only; it is not a paper reproduction result.")

@@ -6,7 +6,9 @@ from threading import Thread
 
 from scripts.cloud_preflight import (
     HardwareInfo,
+    RuntimeInfo,
     assess_hardware,
+    assess_runtime,
     check_network,
     collect_git_commit,
     parse_gpu_memory,
@@ -45,6 +47,30 @@ class CloudPreflightTests(unittest.TestCase):
         errors = "\n".join(assess_hardware("full", info))
         self.assertIn("128 GiB RAM", errors)
         self.assertIn("500 GiB free disk", errors)
+
+    def test_smoke_rejects_old_cuda_driver(self):
+        runtime = RuntimeInfo("520.00", 32, ("nvcc", "gcc", "g++", "make"), 65535)
+        errors, warnings = assess_runtime("smoke", runtime)
+        self.assertIn("CUDA 12.1 requires NVIDIA driver 525.60 or newer", "\n".join(errors))
+        self.assertEqual(warnings, [])
+
+    def test_runtime_rejects_missing_build_tool_and_shared_memory(self):
+        runtime = RuntimeInfo("550.54.14", 4, ("nvcc", "gcc", "make"), 65535)
+        errors, _ = assess_runtime("smoke", runtime)
+        message = "\n".join(errors)
+        self.assertIn("Required CUDA build tools are unavailable: g++", message)
+        self.assertIn("at least 8 GiB available at /dev/shm", message)
+
+    def test_full_requires_more_shared_memory(self):
+        runtime = RuntimeInfo("550.54.14", 8, ("nvcc", "gcc", "g++", "make"), 65535)
+        errors, _ = assess_runtime("full", runtime)
+        self.assertIn("at least 16 GiB available at /dev/shm", "\n".join(errors))
+
+    def test_runtime_warns_when_open_file_limit_is_low(self):
+        runtime = RuntimeInfo("550.54.14", 32, ("nvcc", "gcc", "g++", "make"), 4096)
+        errors, warnings = assess_runtime("smoke", runtime)
+        self.assertEqual(errors, [])
+        self.assertIn("ulimit -n 65535", "\n".join(warnings))
 
     def test_network_check_rejects_http_403(self):
         server = ThreadingHTTPServer(("127.0.0.1", 0), ForbiddenHandler)
